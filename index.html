@@ -187,9 +187,8 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
   <button class="btn" id="libBtn">Library</button>
   <button class="btn" id="libSaveBtn" title="Save this song and its mix in the library">Save to library</button>
   <button class="btn" id="newBtn">New</button>
-  <button class="btn" id="openBtn" title="Cmd/Ctrl+O">Open project</button>
-  <button class="btn" id="saveBtn" title="Cmd/Ctrl+S">Save</button>
-  <button class="btn" id="saveAsBtn">Save as</button>
+  <button class="btn" id="openBtn" title="Open a .btrack song file. Cmd/Ctrl+O">Open song</button>
+  <button class="btn" id="saveBtn" title="Save this song and its audio as a .btrack file. Cmd/Ctrl+Shift+S">Export song</button>
   <button class="btn" id="importBtn">Import audio</button>
   <button class="btn primary" id="exportBtn">Export</button>
 </header>
@@ -849,13 +848,13 @@ function serialize(){
 }
 async function saveProject(as){
   S.name=$('projName').value.trim()||S.name;
-  toast('Saving…',0);
+  toast('Exporting…',0);
   try{
     const h=await saveBlob(serialize(),safeName()+'.btrack','Backline project','.btrack','application/octet-stream',as?null:fileHandle);
-    if(!h) return toast('Save cancelled.');
+    if(!h) return toast('Export cancelled.');
     if(h!==true) fileHandle=h;
-    isDemo=false; dirty=false; syncDirty(); toast('Project saved with its audio inside.');
-  }catch(e){ toast(`The project wasn't saved: ${e.message}`,7000); }
+    isDemo=false; dirty=false; syncDirty(); toast('Song exported with its audio inside.');
+  }catch(e){ toast(`The song wasn't exported: ${e.message}`,7000); }
 }
 function readProjectMeta(ab){
   const u=new Uint8Array(ab);
@@ -897,8 +896,7 @@ async function openDialog(){
   $('fileProj').click();
 }
 $('fileProj').onchange=e=>{ if(e.target.files[0]) openProject(e.target.files[0]); e.target.value=''; };
-$('saveBtn').onclick=()=>saveProject(false);
-$('saveAsBtn').onclick=()=>saveProject(true);
+$('saveBtn').onclick=()=>saveProject(true);
 $('importBtn').onclick=()=>$('fileAudio').click();
 $('fileAudio').onchange=e=>{ importFiles(e.target.files); e.target.value=''; };
 function markDirty(){ dirty=true; syncDirty(); }
@@ -1481,7 +1479,7 @@ $('cmpGo').onclick=async()=>{
   let text=done?`Compressed ${done} song${done===1?'':'s'}: ${mb(before)} is now ${mb(after)}.`:'Nothing was compressed.';
   if(same) text+=` ${same} song${same===1?' has':'s have'} no WAV tracks left to compress.`;
   if(stopped) text+=' Stopped early; finished songs stay compressed.';
-  if(!rec0(targets)&&done) text+=' Save the project to keep this.';
+  if(!rec0(targets)&&done) text+=' Export the song to keep this.';
   if(failed.length) text+=` Not compressed: ${failed.join(', ')}.`;
   say(text,failed.length>0);
 };
