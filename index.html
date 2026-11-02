@@ -1192,10 +1192,10 @@ async function gh(path,opts={}){
   return opts.accept?r.text():r.json();
 }
 /* The audio lives in one library file on Google Drive. Each song's position comes from that file's own header. */
-const DRIVE_ID=/^[\w-]{20,100}$/, pkgCache={};
+const DRIVE_ID=/^[\w-]{10,100}$/, pkgCache={};
 function driveIdOf(link){
-  const t=String(link||'').trim(), m=t.match(/\/d\/([\w-]{20,100})/)||t.match(/[?&]id=([\w-]{20,100})/);
-  return m?m[1]:DRIVE_ID.test(t)?t:'';
+  const t=String(link||'').trim(), m=t.match(/\/d\/([\w-]{10,100})/)||t.match(/[?&]id=([\w-]{10,100})/);
+  return m?m[1]:/^[\w-]{20,100}$/.test(t)?t:'';
 }
 const driveView=id=>`https://drive.google.com/file/d/${id}/view`;
 function pkgUrls(src){
@@ -1262,7 +1262,11 @@ $('pubSaveFile').onclick=async()=>{
 async function publish(){
   const repo=$('pubRepo').value.trim(), prog=$('pubProg'), go=$('pubGo'), fileId=driveIdOf($('pubDrive').value), apiKey=$('pubKey').value.trim();
   ghToken=$('pubToken').value.trim();
-  if(!fileId) return pubSay('Paste the Google Drive share link for your library file.',true);
+  if(!fileId){
+    const typed=$('pubDrive').value.trim();
+    if(/\/folders\//.test(typed)) return pubSay('That is a link to a folder. Open the folder in Drive, right-click the .btlib file, choose Share, then Copy link, and paste that link here.',true);
+    return pubSay(typed?'That link does not point to a single Drive file. In Drive, right-click the .btlib file, choose Share, then Copy link. The link should contain /file/d/.':'Paste the Google Drive share link for your library file.',true);
+  }
   if(apiKey&&!/^[\w-]{20,80}$/.test(apiKey)) return pubSay("That doesn't look like a Google API key.",true);
   if(!/^[\w.-]+\/[\w.-]+$/.test(repo)) return pubSay('Enter the repository as owner/name.',true);
   if(!ghToken) return pubSay('Paste a GitHub token first.',true);
