@@ -137,6 +137,9 @@ progress{width:100%;accent-color:var(--led)}
 .tools button{background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:4px 7px;font:600 12px/1.1 var(--label);cursor:pointer;white-space:nowrap}
 .tools button:hover:not([disabled]){border-color:var(--dim)}.tools button[disabled]{opacity:.4;cursor:default}
 .tag{font:600 11px var(--label);color:#201608;background:var(--led);border-radius:3px;padding:0 4px}
+.driveFoot{margin-top:6px}
+a.btn{color:inherit;text-decoration:none;display:inline-block}
+.pubStep{display:grid;gap:5px;justify-items:start}
 .foot{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .empty{color:var(--dim);margin:6px 2px;font-size:13px}
 #libSaveCur{white-space:normal;overflow-wrap:anywhere}
@@ -264,7 +267,7 @@ progress{width:100%;accent-color:var(--led)}
     <div class="tabs"><button class="tab" id="tabMine">My library</button><button class="tab" id="tabWeb">Web library</button></div>
     <span class="meta" id="libUse"></span><span class="spacer"></span>
     <button class="btn" id="libLink" title="Open a project or library from a web address">Open from link</button>
-    <button class="btn" id="libPublish" title="Share songs and shows on this site">Publish to GitHub</button>
+    <button class="btn" id="libPublish" title="Share your song and show list on this site">Publish list</button>
     <button class="btn" id="libCompress" title="Convert WAV tracks to MP3 to save space">Compress audio</button>
     <button class="btn" id="libBackup" title="Save all songs and shows as one file">Back up</button>
     <button class="btn" id="libRestore">Restore backup</button>
@@ -285,16 +288,21 @@ progress{width:100%;accent-color:var(--led)}
   <p id="cmpMsg" role="status"></p>
   <div class="acts"><button type="button" class="btn" id="cmpClose">Close</button><button type="button" class="btn primary" id="cmpGo">Compress</button></div>
 </dialog>
-<dialog id="pubDlg" aria-label="Publish to GitHub">
-  <h2>Publish to GitHub</h2>
-  <p class="warn">Everyone on the web can play and download what you publish, including the audio. Publish only music you have the right to share. Git keeps old versions, so unpublishing does not erase the file from the repository's history.</p>
+<dialog id="pubDlg" aria-label="Publish list">
+  <h2>Publish list</h2>
+  <p class="meta">Your song names, tempos, set lists and Drive link are saved on GitHub. Your audio stays on your Google Drive.</p>
+  <p class="warn">Everyone on the web can see the list and download the Drive file, so share only music you have the right to share.</p>
   <div id="pubList"></div>
-  <label><span class="lbl">Repository</span><input id="pubRepo" type="text" spellcheck="false" autocomplete="off"></label>
+  <div class="pubStep"><span class="lbl">1. Upload your audio</span><button type="button" class="btn" id="pubSaveFile">Save library file</button><span class="meta">Saves the ticked songs as one file. Upload it to Google Drive and share it with anyone who has the link. Press Compress audio first to make it smaller.</span></div>
+  <label><span class="lbl">2. Google Drive share link</span><input id="pubDrive" type="text" spellcheck="false" autocomplete="off" placeholder="https://drive.google.com/file/d/…"></label>
+  <label><span class="lbl">Google API key (optional)</span><input id="pubKey" type="text" spellcheck="false" autocomplete="off"></label>
+  <p class="meta">Add one if songs won't open directly from Drive. It is saved publicly in the list, so restrict it to this website and the Google Drive API.</p>
+  <label><span class="lbl">3. Repository</span><input id="pubRepo" type="text" spellcheck="false" autocomplete="off"></label>
   <label><span class="lbl">GitHub token</span><input id="pubToken" type="password" autocomplete="off" spellcheck="false"></label>
   <p class="meta"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token</a> for this repository only, with Contents set to Read and write. It is sent only to GitHub and is forgotten when you close this window.</p>
   <progress id="pubProg" max="1" hidden></progress>
   <p id="pubMsg" role="status"></p>
-  <div class="acts"><button type="button" class="btn" id="pubClose">Close</button><button type="button" class="btn primary" id="pubGo">Publish</button></div>
+  <div class="acts"><button type="button" class="btn" id="pubClose">Close</button><button type="button" class="btn primary" id="pubGo">Publish list</button></div>
 </dialog>
 <input id="fileLib" type="file" multiple accept=".btrack" hidden>
 <input id="fileRestore" type="file" accept=".btlib" hidden>
@@ -1014,10 +1022,7 @@ $('fileLib').onchange=async e=>{
 const LIBMAGIC=new TextEncoder().encode('BKLB1');
 $('libBackup').onclick=async()=>{
   try{
-    await refreshLib(); let off=0;
-    const songs=lib.songs.map(s=>{ const r={id:s.id,name:s.name,bpm:s.bpm,duration:s.duration,updatedAt:s.updatedAt,at:off,len:s.blob.size}; off+=s.blob.size; return r; });
-    const json=new TextEncoder().encode(JSON.stringify({version:1,songs,shows:lib.shows})), head=new Uint8Array(4); new DataView(head.buffer).setUint32(0,json.length,true);
-    const blob=new Blob([LIBMAGIC,head,json,...lib.songs.map(s=>s.blob)],{type:'application/octet-stream'});
+    await refreshLib(); const blob=buildLibraryFile(lib.songs,lib.shows);
     const d=new Date().toISOString().slice(0,10);
     if(await saveBlob(blob,`Backline library ${d}.btlib`,'Backline library','.btlib','application/octet-stream')) toast('Library backup saved.');
   }catch(e){ toast(`The backup wasn't saved: ${e.message}`,8000); }
@@ -1036,13 +1041,13 @@ async function restoreLibrary(f){
       const {at,len,...rec}=s; rec.blob=new Blob([await f.slice(base+at,base+at+len).arrayBuffer()]); await dbPut('songs',rec); added++;
     }
     for(const s of meta.shows){ if(!SAFE_ID.test(s?.id)) continue; const cur=shows.find(x=>x.id===s.id); if(!cur||(cur.updatedAt||0)<(s.updatedAt||0)) await dbPut('shows',s); }
-    await refreshLib(); toast(`Restored the backup: ${added} song${added===1?'':'s'} added or updated, ${meta.shows.length} show${meta.shows.length===1?'':'s'} checked. Newer copies here were kept.`,7000);
+    libTab='mine'; await refreshLib(); toast(`Restored the backup: ${added} song${added===1?'':'s'} added or updated, ${meta.shows.length} show${meta.shows.length===1?'':'s'} checked. Newer copies here were kept.`,7000);
   }catch(err){ toast(`${f.name} can't be restored: ${err.message}.`,8000); }
 }
 
 /* ---------- web library, shared links and publishing ---------- */
 const SAFE_ID=/^[\w-]{1,80}$/, DEFAULT_MANIFEST=new URL('library/index.json',location.origin+location.pathname).href;
-let web={url:DEFAULT_MANIFEST,songs:[],shows:[],error:''}, webSel=null, libTab='mine', ghToken='', pubItems=[];
+let web={url:DEFAULT_MANIFEST,songs:[],shows:[],error:'',source:null}, webSel=null, libTab='mine', ghToken='', pubItems=[];
 function findSong(id,src){
   const w=web.songs.find(s=>s.id===id), l=lib.songs.find(s=>s.id===id);
   return src==='web'||activeShow?.web ? (w||l) : (l||w);
@@ -1055,8 +1060,8 @@ function normalizeUrl(raw){
   if(u.protocol!=='https:'&&u.origin!==location.origin) throw new Error('the address must start with https://');
   return u.href;
 }
-async function fetchBlob(url,label){
-  const r=await fetch(url,{cache:'no-cache'});
+async function fetchBlob(url,label,range){
+  const r=await fetch(url,range?{headers:{Range:range}}:{cache:'no-cache'});
   if(!r.ok) throw new Error(`the server answered ${r.status}`);
   const total=+r.headers.get('content-length')||0;
   if(!r.body||!label) return r.blob();
@@ -1067,17 +1072,19 @@ async function fetchBlob(url,label){
 }
 async function songBlob(rec,quiet){
   if(rec.blob) return rec.blob;
-  rec.blob=await fetchBlob(rec.url,quiet?null:rec.name);
+  rec.quiet=quiet;
+  rec.blob=rec.source?await pkgSong(rec):await fetchBlob(rec.url,quiet?null:rec.name);
   return rec.blob;
 }
 function parseManifest(json,url){
   if(!json||!Array.isArray(json.songs)) throw new Error('it is not a Backline web library');
-  const songs=json.songs.filter(s=>SAFE_ID.test(s?.id)&&typeof s.file==='string').map(s=>{
-    const u=new URL(s.file,url); if(u.protocol!=='https:'&&u.origin!==location.origin) return null;
-    return {id:s.id,name:String(s.name||'Untitled').slice(0,200),bpm:+s.bpm||0,duration:Number.isFinite(s.duration)?s.duration:null,updatedAt:+s.updatedAt||0,size:+s.size||0,file:s.file,url:u.href};
+  const src=json.source, source=src?.type==='gdrive'&&DRIVE_ID.test(src.fileId)?{type:'gdrive',fileId:src.fileId,...(/^[\w-]{20,80}$/.test(src.apiKey||'')?{apiKey:src.apiKey}:{})}:null;
+  const songs=json.songs.filter(s=>SAFE_ID.test(s?.id)&&(source||typeof s.file==='string')).map(s=>{
+    const u=s.file?new URL(s.file,url):null; if(u&&u.protocol!=='https:'&&u.origin!==location.origin) return null;
+    return {source:u?null:source,id:s.id,name:String(s.name||'Untitled').slice(0,200),bpm:+s.bpm||0,duration:Number.isFinite(s.duration)?s.duration:null,updatedAt:+s.updatedAt||0,size:+s.size||0,file:s.file,url:u?.href};
   }).filter(Boolean);
   const shows=(json.shows||[]).filter(s=>SAFE_ID.test(s?.id)).map(s=>({id:s.id,name:String(s.name||'Untitled show').slice(0,200),date:/^\d{4}-\d\d-\d\d$/.test(s.date)?s.date:'',songIds:(s.songIds||[]).filter(i=>typeof i==='string'&&SAFE_ID.test(i)),web:true}));
-  return {url,songs,shows,error:''};
+  return {url,songs,shows,source,error:''};
 }
 async function loadManifest(url){
   const r=await fetch(url,{cache:'no-cache'});
@@ -1129,6 +1136,7 @@ function renderWebLib(){
   } else $('libSet').innerHTML='<p class="empty">Select a show to see its set list.</p>';
   $('libSongs').innerHTML=web.songs.map(s=>{ const mine=lib.songs.some(x=>x.id===s.id);
     return `<div class="row"><span class="nm">${esc(s.name)}${mine?' <span class="tag">Saved</span>':''}<span class="meta"> ${esc(s.bpm)} BPM · ${fmtLen(s.duration)}${s.size?` · ${(s.size/1048576).toFixed(0)} MB`:''}</span></span><span class="tools"><button data-web="opensong" data-id="${esc(s.id)}">Open</button><button data-web="linksong" data-id="${esc(s.id)}">Copy link</button><button data-web="savesong" data-id="${esc(s.id)}">Save</button></span></div>`; }).join('')||`<p class="empty">${esc(emptyMsg)}</p>`;
+  if(web.source) $('libSongs').innerHTML+=`<div class="foot driveFoot"><a class="btn" href="${esc(driveView(web.source.fileId))}" target="_blank" rel="noopener">Download library from Drive</a><button class="btn" data-web="restore">Restore downloaded file</button></div>`;
 }
 async function copyWebSong(s){
   const blob=await songBlob(s), cur=lib.songs.find(x=>x.id===s.id);
@@ -1141,6 +1149,7 @@ $('libDlg').addEventListener('click',async e=>{
   const a=b.dataset.web, id=b.dataset.id, sel=web.shows.find(s=>s.id===webSel);
   try{
     if(a==='select'){ webSel=id; renderLib(); }
+    else if(a==='restore') $('fileRestore').click();
     else if(a==='opensong'){ if(await loadSong(id,'web')) $('libDlg').close(); }
     else if(a==='linksong') copyLink(shareLink('song',id));
     else if(a==='linkshow'&&sel) copyLink(shareLink('show',sel.id));
@@ -1182,77 +1191,106 @@ async function gh(path,opts={}){
   }
   return opts.accept?r.text():r.json();
 }
-function blobToB64(blob){ return new Promise((res,rej)=>{ const f=new FileReader(); f.onload=()=>res(f.result.slice(f.result.indexOf(',')+1)); f.onerror=()=>rej(f.error); f.readAsDataURL(blob); }); }
-const MAX_FILE=95*1048576, MAX_SITE=1000*1048576;
+/* The audio lives in one library file on Google Drive. Each song's position comes from that file's own header. */
+const DRIVE_ID=/^[\w-]{20,100}$/, pkgCache={};
+function driveIdOf(link){
+  const t=String(link||'').trim(), m=t.match(/\/d\/([\w-]{20,100})/)||t.match(/[?&]id=([\w-]{20,100})/);
+  return m?m[1]:DRIVE_ID.test(t)?t:'';
+}
+const driveView=id=>`https://drive.google.com/file/d/${id}/view`;
+function pkgUrls(src){
+  const u=[]; if(src.apiKey) u.push(`https://www.googleapis.com/drive/v3/files/${src.fileId}?alt=media&key=${src.apiKey}`);
+  u.push(`https://drive.usercontent.google.com/download?id=${src.fileId}&export=download&confirm=t`); return u;
+}
+async function pkgOpen(src){
+  const key=src.fileId+':'+(src.apiKey||''); if(pkgCache[key]) return pkgCache[key];
+  for(const url of pkgUrls(src)){
+    try{
+      const head=await fetchBlob(url,null,'bytes=0-8'), whole=head.size>9?head:null, h9=new Uint8Array(await head.slice(0,9).arrayBuffer());
+      if(h9.length<9||!LIBMAGIC.every((b,i)=>h9[i]===b)) continue;
+      const jl=new DataView(h9.buffer).getUint32(5,true);
+      const jb=whole?whole.slice(9,9+jl):await fetchBlob(url,null,`bytes=9-${8+jl}`), meta=JSON.parse(await jb.text());
+      const songs={}; for(const s of meta.songs||[]) if(SAFE_ID.test(s?.id)) songs[s.id]={at:9+jl+(+s.at),len:+s.len};
+      return pkgCache[key]={url,whole,songs};
+    }catch{}
+  }
+  throw new Error('Google Drive would not let this page read the library file. Check it is shared with anyone who has the link, or press Download library from Drive and restore the file');
+}
+async function pkgSong(rec){
+  const p=await pkgOpen(rec.source), e=p.songs[rec.id];
+  if(!e) throw new Error('this song is not in the library file on Google Drive yet');
+  if(p.whole) return p.whole.slice(e.at,e.at+e.len);
+  const b=await fetchBlob(p.url,rec.quiet?null:rec.name,`bytes=${e.at}-${e.at+e.len-1}`);
+  return b.size===e.len?b:b.slice(e.at,e.at+e.len);
+}
+function buildLibraryFile(songs,shows){
+  let off=0;
+  const list=songs.map(s=>{ const r={id:s.id,name:s.name,bpm:s.bpm,duration:s.duration,updatedAt:s.updatedAt,at:off,len:s.blob.size}; off+=s.blob.size; return r; });
+  const json=new TextEncoder().encode(JSON.stringify({version:1,songs:list,shows})), head=new Uint8Array(4); new DataView(head.buffer).setUint32(0,json.length,true);
+  return new Blob([LIBMAGIC,head,json,...songs.map(s=>s.blob)],{type:'application/octet-stream'});
+}
 async function openPublish(){
-  let cur={songs:[],shows:[]}; try{ const r=await fetch(DEFAULT_MANIFEST,{cache:'no-cache'}); if(r.ok) cur=parseManifest(await r.json(),DEFAULT_MANIFEST); }catch{}
+  let cur={songs:[],shows:[],source:null}; try{ const r=await fetch(DEFAULT_MANIFEST,{cache:'no-cache'}); if(r.ok) cur=parseManifest(await r.json(),DEFAULT_MANIFEST); }catch{}
   await refreshLib();
-  const onWeb=id=>cur.songs.some(s=>s.id===id), showOnWeb=id=>cur.shows.some(s=>s.id===id);
+  const onWeb=id=>cur.songs.some(s=>s.id===id), showOnWeb=id=>cur.shows.some(s=>s.id===id), fresh=!cur.songs.length;
   pubItems=[
-    ...lib.shows.map(s=>({kind:'show',id:s.id,name:s.name,rec:s,on:showOnWeb(s.id)})),
-    ...cur.shows.filter(s=>!lib.shows.some(x=>x.id===s.id)).map(s=>({kind:'show',id:s.id,name:s.name,rec:s,on:true,webOnly:true})),
-    ...lib.songs.map(s=>({kind:'song',id:s.id,name:s.name,rec:s,on:onWeb(s.id)})),
-    ...cur.songs.filter(s=>!lib.songs.some(x=>x.id===s.id)).map(s=>({kind:'song',id:s.id,name:s.name,rec:s,on:true,webOnly:true})),
+    ...lib.shows.map(s=>({kind:'show',id:s.id,name:s.name,rec:s,on:fresh||showOnWeb(s.id)})),
+    ...lib.songs.map(s=>({kind:'song',id:s.id,name:s.name,rec:s,on:fresh||onWeb(s.id)})),
   ];
-  const row=(it,i)=>`<label class="pubRow"><input type="checkbox" data-i="${i}" ${it.on?'checked':''}><span>${esc(it.name)}${it.webOnly?' <span class="meta">(only on the web)</span>':''}${it.kind==='song'?` <span class="meta">${((it.rec.blob?.size||it.rec.size||0)/1048576).toFixed(1)} MB</span>`:''}</span></label>`;
+  const row=(it,i)=>`<label class="pubRow"><input type="checkbox" data-i="${i}" ${it.on?'checked':''}><span>${esc(it.name)}${it.kind==='song'?` <span class="meta">${(it.rec.blob.size/1048576).toFixed(1)} MB</span>`:''}</span></label>`;
   const part=k=>pubItems.map((it,i)=>it.kind===k?row(it,i):'').join('');
   $('pubList').innerHTML=(pubItems.some(i=>i.kind==='show')?`<p class="lbl">Shows, with their songs</p>${part('show')}`:'')+(pubItems.some(i=>i.kind==='song')?`<p class="lbl">Songs</p>${part('song')}`:'')||'<p class="empty">Your library is empty. Save a song to it first.</p>';
-  $('pubRepo').value=defaultRepo(); $('pubToken').value=ghToken; $('pubProg').hidden=true; $('pubMsg').textContent='Checked items are published. Unchecking an item takes it off the site.'; $('pubMsg').className='';
+  $('pubRepo').value=defaultRepo(); $('pubToken').value=ghToken; $('pubProg').hidden=true; $('pubMsg').textContent=''; $('pubMsg').className='';
+  $('pubDrive').value=cur.source?driveView(cur.source.fileId):''; $('pubKey').value=cur.source?.apiKey||'';
   $('pubDlg').showModal();
 }
 function selectedForPublish(){
   const boxes=[...$('pubList').querySelectorAll('input[type=checkbox]')].filter(b=>b.checked).map(b=>pubItems[+b.dataset.i]);
   const shows=boxes.filter(i=>i.kind==='show').map(i=>i.rec), ids=new Set(boxes.filter(i=>i.kind==='song').map(i=>i.id));
   for(const s of shows) for(const id of s.songIds) ids.add(id);
-  return {shows,ids};
+  return {shows,songs:lib.songs.filter(s=>ids.has(s.id))};
 }
+function pubSay(t,bad){ $('pubMsg').textContent=t; $('pubMsg').className=bad?'warn':''; }
+$('pubSaveFile').onclick=async()=>{
+  const {shows,songs}=selectedForPublish();
+  if(!songs.length) return pubSay('Tick at least one song or show first.',true);
+  try{
+    const ids=new Set(songs.map(s=>s.id)), list=shows.map(s=>({...s,songIds:s.songIds.filter(i=>ids.has(i))})), blob=buildLibraryFile(songs,list);
+    if(await saveBlob(blob,'Backline library.btlib','Backline library','.btlib','application/octet-stream')) pubSay(`Saved ${(blob.size/1048576).toFixed(0)} MB. Upload it to Google Drive and share it with anyone who has the link. To update it later, use Manage versions in Drive so the link stays the same.`);
+  }catch(e){ pubSay(`The file wasn't saved: ${e.message}`,true); }
+};
 async function publish(){
-  const repo=$('pubRepo').value.trim(), msg=$('pubMsg'), prog=$('pubProg'), go=$('pubGo');
-  const say=(t,bad)=>{ msg.textContent=t; msg.className=bad?'warn':''; };
+  const repo=$('pubRepo').value.trim(), prog=$('pubProg'), go=$('pubGo'), fileId=driveIdOf($('pubDrive').value), apiKey=$('pubKey').value.trim();
   ghToken=$('pubToken').value.trim();
-  if(!/^[\w.-]+\/[\w.-]+$/.test(repo)) return say('Enter the repository as owner/name.',true);
-  if(!ghToken) return say('Paste a GitHub token first.',true);
-  const {shows,ids}=selectedForPublish();
+  if(!fileId) return pubSay('Paste the Google Drive share link for your library file.',true);
+  if(apiKey&&!/^[\w-]{20,80}$/.test(apiKey)) return pubSay("That doesn't look like a Google API key.",true);
+  if(!/^[\w.-]+\/[\w.-]+$/.test(repo)) return pubSay('Enter the repository as owner/name.',true);
+  if(!ghToken) return pubSay('Paste a GitHub token first.',true);
+  const {shows,songs}=selectedForPublish();
+  if(!songs.length) return pubSay('Tick at least one song or show first.',true);
   go.disabled=true; prog.hidden=false; prog.removeAttribute('value');
   try{
-    say('Contacting GitHub…');
+    const source={type:'gdrive',fileId,...(apiKey?{apiKey}:{})}; let driveNote='';
+    pubSay('Checking the Google Drive file…');
+    delete pkgCache[fileId+':'+apiKey];
+    try{ const p=await pkgOpen(source), missing=songs.filter(s=>!p.songs[s.id]).map(s=>s.name); if(missing.length) driveNote=` These songs aren't in the Drive file yet: ${missing.join(', ')}. Save the library file again and upload it.`; }
+    catch{ driveNote=' This page could not read the Drive file directly, so people will need to use Download library from Drive. Check the file is shared with anyone who has the link.'; }
+    pubSay('Saving the list to GitHub…');
     const base=`/repos/${repo}`, info=await gh(base), branch=info.default_branch;
     const old=await gh(`${base}/contents/library/index.json?ref=${encodeURIComponent(branch)}`,{accept:'application/vnd.github.raw+json',allow404:true});
-    const prior=old?parseManifest(JSON.parse(old),DEFAULT_MANIFEST):{songs:[],shows:[]};
-    const songs=[]; const missing=[];
-    for(const id of ids){
-      const l=lib.songs.find(s=>s.id===id), p=prior.songs.find(s=>s.id===id);
-      if(l) songs.push(l); else if(p) songs.push(p); else missing.push(id);
-    }
-    const big=songs.find(s=>(s.blob?.size||s.size||0)>MAX_FILE);
-    if(big) throw new Error(`${big.name} is over GitHub's 100 MB file limit. Convert its tracks to MP3 and save it again`);
-    const total=songs.reduce((m,s)=>m+(s.blob?.size||s.size||0),0);
-    if(total>MAX_SITE) throw new Error(`The selection is ${(total/1048576).toFixed(0)} MB, over the 1 GB GitHub Pages limit. Publish fewer songs`);
-    const tree=[], entries=[]; let done=0, sizeDone=0;
-    const uploads=songs.filter(s=>{ const p=prior.songs.find(x=>x.id===s.id); return s.blob&&!(p&&p.updatedAt===s.updatedAt); });
-    const upTotal=uploads.reduce((m,s)=>m+s.blob.size,0)||1;
-    for(const s of songs){
-      const file=`songs/${s.id}.btrack`, p=prior.songs.find(x=>x.id===s.id);
-      entries.push({id:s.id,name:s.name,bpm:s.bpm,duration:s.duration,updatedAt:s.updatedAt,size:s.blob?.size||s.size||0,file});
-      if(!uploads.includes(s)) continue;
-      say(`Uploading ${s.name} (${++done} of ${uploads.length})…`); prog.value=sizeDone/upTotal;
-      const {sha}=await gh(`${base}/git/blobs`,{method:'POST',body:JSON.stringify({content:await blobToB64(s.blob),encoding:'base64'})});
-      tree.push({path:`library/${file}`,mode:'100644',type:'blob',sha}); sizeDone+=s.blob.size;
-    }
-    for(const p of prior.songs) if(!ids.has(p.id)&&/^songs\/[\w-]+\.btrack$/.test(p.file)) tree.push({path:`library/${p.file}`,mode:'100644',type:'blob',sha:null});
-    const manifest={version:1,updatedAt:Date.now(),songs:entries,shows:shows.map(s=>({id:s.id,name:s.name,date:s.date||'',songIds:s.songIds.filter(i=>ids.has(i)&&!missing.includes(i))}))};
-    tree.push({path:'library/index.json',mode:'100644',type:'blob',content:JSON.stringify(manifest,null,1)});
-    say('Saving to GitHub…'); prog.removeAttribute('value');
+    const prior=old?parseManifest(JSON.parse(old),DEFAULT_MANIFEST):{songs:[]}, ids=new Set(songs.map(s=>s.id));
+    const manifest={version:2,updatedAt:Date.now(),source,songs:songs.map(s=>({id:s.id,name:s.name,bpm:s.bpm,duration:s.duration,updatedAt:s.updatedAt,size:s.blob.size})),shows:shows.map(s=>({id:s.id,name:s.name,date:s.date||'',songIds:s.songIds.filter(i=>ids.has(i))}))};
+    const tree=[{path:'library/index.json',mode:'100644',type:'blob',content:JSON.stringify(manifest,null,1)}];
+    for(const p of prior.songs) if(/^songs\/[\w-]+\.btrack$/.test(p.file||'')) tree.push({path:`library/${p.file}`,mode:'100644',type:'blob',sha:null});
     const ref=await gh(`${base}/git/ref/heads/${encodeURIComponent(branch)}`), parent=ref.object.sha, commit=await gh(`${base}/git/commits/${parent}`);
     const newTree=await gh(`${base}/git/trees`,{method:'POST',body:JSON.stringify({base_tree:commit.tree.sha,tree})});
-    const newCommit=await gh(`${base}/git/commits`,{method:'POST',body:JSON.stringify({message:`Update web library: ${entries.length} songs, ${manifest.shows.length} shows`,tree:newTree.sha,parents:[parent]})});
+    const newCommit=await gh(`${base}/git/commits`,{method:'POST',body:JSON.stringify({message:`Update library list: ${manifest.songs.length} songs, ${manifest.shows.length} shows`,tree:newTree.sha,parents:[parent]})});
     await gh(`${base}/git/refs/heads/${encodeURIComponent(branch)}`,{method:'PATCH',body:JSON.stringify({sha:newCommit.sha})});
     try{ localStorage.setItem('backline.repo',repo); }catch{}
-    prog.hidden=true;
-    say(`Published ${entries.length} song${entries.length===1?'':'s'} and ${manifest.shows.length} show${manifest.shows.length===1?'':'s'}. The site updates in a minute or two. Then press Web library to see it.`);
-    web={url:DEFAULT_MANIFEST,songs:[],shows:[],error:''};
-  }catch(e){ prog.hidden=true; say(`Nothing was published: ${friendlyFetchError(e)}.`,true); }
-  go.disabled=false;
+    pubSay(`Published the list: ${manifest.songs.length} song${manifest.songs.length===1?'':'s'} and ${manifest.shows.length} show${manifest.shows.length===1?'':'s'}. The site updates in a minute or two.${driveNote}`,!!driveNote);
+    web={url:DEFAULT_MANIFEST,songs:[],shows:[],error:'',source:null};
+  }catch(e){ pubSay(`The list wasn't published: ${friendlyFetchError(e)}.`,true); }
+  prog.hidden=true; go.disabled=false;
 }
 $('libPublish').onclick=openPublish;
 $('pubGo').onclick=publish;

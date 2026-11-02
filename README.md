@@ -6,7 +6,7 @@ Use Chrome or Edge to send the click to a separate output device. Audio stays on
 
 ## Sharing on the web
 
-**Library > Publish to GitHub** puts the songs and shows you select in the `library/` folder of this repository. Everyone can then open them from **Library > Web library** or a shared link. Published audio is public, so publish only music you have the right to share.
+The song and show list is saved in `library/index.json` in this repository. The audio is one `.btlib` file on Google Drive, shared with anyone who has the link. Use **Library > Publish list** to save the file and publish the list. Only share music you have the right to share.
 
 Links: `?show=<id>`, `?song=<id>`, `?project=<url>`, `?library=<url to index.json>`
 
