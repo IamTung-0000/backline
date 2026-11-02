@@ -161,6 +161,11 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
 #pubList{overflow:auto;flex:1;min-height:90px;max-height:240px;background:var(--well);border-radius:5px;padding:8px;display:flex;flex-direction:column;gap:5px}
 #pubList label.pubRow{display:flex;gap:8px;align-items:flex-start}
 #pubList .lbl{margin-top:4px}
+#delDlg{width:min(460px,calc(100vw - 32px))}
+#delDlg[open]{display:flex;flex-direction:column;gap:10px}
+#delDlg h2{margin:0;overflow-wrap:anywhere}#delDlg p{margin:0}
+#delDlg label{display:grid;gap:3px}#delDlg label.delAlso{display:flex;gap:8px;align-items:flex-start}#delDlg input[type=text],#delDlg input[type=password]{width:100%}
+#delDlg a{color:var(--led)}#delMsg.warn{color:var(--solo)}
 @media (max-width:980px),(max-height:620px){
   #libDlg{height:auto;max-height:calc(100vh - 24px);overflow:auto}
   .libCols{grid-template-columns:minmax(0,1fr)}
@@ -306,6 +311,17 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
   <progress id="pubProg" max="1" hidden></progress>
   <p id="pubMsg" role="status"></p>
   <div class="acts"><button type="button" class="btn" id="pubClose">Close</button><button type="button" class="btn primary" id="pubGo">Publish list</button></div>
+</dialog>
+<dialog id="delDlg" aria-label="Delete from web library">
+  <h2 id="delTitle"></h2>
+  <p id="delInfo"></p>
+  <label class="delAlso" id="delAlsoRow"><input type="checkbox" id="delAlso"><span id="delAlsoText"></span></label>
+  <p class="meta">Your own library is not changed. The audio stays in the file on Google Drive, so anyone who already has that link can still download it.</p>
+  <label><span class="lbl">Repository</span><input id="delRepo" type="text" spellcheck="false" autocomplete="off"></label>
+  <label><span class="lbl">GitHub token</span><input id="delToken" type="password" autocomplete="off" spellcheck="false"></label>
+  <p class="meta">Use a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> with Contents set to Read and write. It is sent only to GitHub and is forgotten when you close this window.</p>
+  <p id="delMsg" role="status"></p>
+  <div class="acts"><button type="button" class="btn" id="delClose">Cancel</button><button type="button" class="btn primary" id="delGo">Delete</button></div>
 </dialog>
 <input id="fileLib" type="file" multiple accept=".btrack" hidden>
 <input id="fileRestore" type="file" accept=".btlib" hidden>
@@ -1139,10 +1155,10 @@ function renderWebLib(){
   if(sel){
     const list=songsOf(sel), total=list.reduce((m,s)=>m+(s.duration||0),0);
     $('libSet').innerHTML=`<div class="scroll"><p class="setTitle">${esc(sel.name)}</p>${list.map((s,i)=>`<div class="row"><b class="n">${i+1}</b><span class="nm">${esc(s.name)}<span class="meta"> ${esc(s.bpm)} BPM · ${fmtLen(s.duration)}</span></span></div>`).join('')||'<p class="empty">This show has no songs.</p>'}</div>
-      <div class="foot"><span class="meta">${list.length} songs · ${fmtLen(total)} total</span><span class="spacer"></span><button class="btn" data-web="linkshow">Copy link</button><button class="btn" data-web="saveshow" ${list.length?'':'disabled'}>Save to my library</button><button class="btn primary" data-web="openshow" ${list.length?'':'disabled'}>Open show</button></div>`;
+      <div class="foot"><span class="meta">${list.length} songs · ${fmtLen(total)} total</span><span class="spacer"></span>${web.url===DEFAULT_MANIFEST?'<button class="btn" data-web="delshow">Delete</button>':''}<button class="btn" data-web="linkshow">Copy link</button><button class="btn" data-web="saveshow" ${list.length?'':'disabled'}>Save to my library</button><button class="btn primary" data-web="openshow" ${list.length?'':'disabled'}>Open show</button></div>`;
   } else $('libSet').innerHTML='<p class="empty">Select a show to see its set list.</p>';
   $('libSongs').innerHTML=web.songs.map(s=>{ const mine=lib.songs.some(x=>x.id===s.id);
-    return `<div class="row"><span class="nm">${esc(s.name)}${mine?' <span class="tag">Saved</span>':''}<span class="meta"> ${esc(s.bpm)} BPM · ${fmtLen(s.duration)}${s.size?` · ${(s.size/1048576).toFixed(0)} MB`:''}</span></span><span class="tools"><button data-web="opensong" data-id="${esc(s.id)}">Open</button><button data-web="linksong" data-id="${esc(s.id)}">Copy link</button><button data-web="savesong" data-id="${esc(s.id)}">Save</button></span></div>`; }).join('')||`<p class="empty">${esc(emptyMsg)}</p>`;
+    return `<div class="row"><span class="nm">${esc(s.name)}${mine?' <span class="tag">Saved</span>':''}<span class="meta"> ${esc(s.bpm)} BPM · ${fmtLen(s.duration)}${s.size?` · ${(s.size/1048576).toFixed(0)} MB`:''}</span></span><span class="tools"><button data-web="opensong" data-id="${esc(s.id)}">Open</button><button data-web="linksong" data-id="${esc(s.id)}">Copy link</button><button data-web="savesong" data-id="${esc(s.id)}">Save</button>${web.url===DEFAULT_MANIFEST?`<button data-web="delsong" data-id="${esc(s.id)}">Delete</button>`:''}</span></div>`; }).join('')||`<p class="empty">${esc(emptyMsg)}</p>`;
   if(web.source) $('libSongs').innerHTML+=`<div class="foot driveFoot"><a class="btn" href="${esc(driveView(web.source.fileId))}" target="_blank" rel="noopener">Download library from Drive</a><button class="btn" data-web="restore">Restore downloaded file</button></div>`;
 }
 async function copyWebSong(s){
@@ -1158,6 +1174,8 @@ $('libDlg').addEventListener('click',async e=>{
     if(a==='select'){ webSel=id; renderLib(); }
     else if(a==='restore') $('fileRestore').click();
     else if(a==='opensong'){ if(await loadSong(id,'web')) $('libDlg').close(); }
+    else if(a==='delshow'&&sel) openDelete('show',sel.id);
+    else if(a==='delsong') openDelete('song',id);
     else if(a==='linksong') copyLink(shareLink('song',id));
     else if(a==='linkshow'&&sel) copyLink(shareLink('show',sel.id));
     else if(a==='savesong'){ const s=web.songs.find(x=>x.id===id); const did=await copyWebSong(s); await refreshLib(); toast(did?`Saved ${s.name} to your library.`:`Your library already has this version of ${s.name}.`); }
@@ -1197,6 +1215,12 @@ async function gh(path,opts={}){
     throw new Error(m.message||`GitHub answered ${r.status}`);
   }
   return opts.accept?r.text():r.json();
+}
+async function ghCommit(base,branch,tree,message){
+  const ref=await gh(`${base}/git/ref/heads/${encodeURIComponent(branch)}`), parent=ref.object.sha, commit=await gh(`${base}/git/commits/${parent}`);
+  const newTree=await gh(`${base}/git/trees`,{method:'POST',body:JSON.stringify({base_tree:commit.tree.sha,tree})});
+  const newCommit=await gh(`${base}/git/commits`,{method:'POST',body:JSON.stringify({message,tree:newTree.sha,parents:[parent]})});
+  await gh(`${base}/git/refs/heads/${encodeURIComponent(branch)}`,{method:'PATCH',body:JSON.stringify({sha:newCommit.sha})});
 }
 /* The audio lives in one library file on Google Drive. Each song's position comes from that file's own header. */
 const DRIVE_ID=/^[\w-]{10,100}$/, pkgCache={};
@@ -1293,16 +1317,69 @@ async function publish(){
     const manifest={version:2,updatedAt:Date.now(),source,songs:songs.map(s=>({id:s.id,name:s.name,bpm:s.bpm,duration:s.duration,updatedAt:s.updatedAt,size:s.blob.size})),shows:shows.map(s=>({id:s.id,name:s.name,date:s.date||'',songIds:s.songIds.filter(i=>ids.has(i))}))};
     const tree=[{path:'library/index.json',mode:'100644',type:'blob',content:JSON.stringify(manifest,null,1)}];
     for(const p of prior.songs) if(/^songs\/[\w-]+\.btrack$/.test(p.file||'')) tree.push({path:`library/${p.file}`,mode:'100644',type:'blob',sha:null});
-    const ref=await gh(`${base}/git/ref/heads/${encodeURIComponent(branch)}`), parent=ref.object.sha, commit=await gh(`${base}/git/commits/${parent}`);
-    const newTree=await gh(`${base}/git/trees`,{method:'POST',body:JSON.stringify({base_tree:commit.tree.sha,tree})});
-    const newCommit=await gh(`${base}/git/commits`,{method:'POST',body:JSON.stringify({message:`Update library list: ${manifest.songs.length} songs, ${manifest.shows.length} shows`,tree:newTree.sha,parents:[parent]})});
-    await gh(`${base}/git/refs/heads/${encodeURIComponent(branch)}`,{method:'PATCH',body:JSON.stringify({sha:newCommit.sha})});
+    await ghCommit(base,branch,tree,`Update library list: ${manifest.songs.length} songs, ${manifest.shows.length} shows`);
     try{ localStorage.setItem('backline.repo',repo); }catch{}
     pubSay(`Published the list: ${manifest.songs.length} song${manifest.songs.length===1?'':'s'} and ${manifest.shows.length} show${manifest.shows.length===1?'':'s'}. The site updates in a minute or two.${driveNote}`,!!driveNote);
     web={url:DEFAULT_MANIFEST,songs:[],shows:[],error:'',source:null};
   }catch(e){ pubSay(`The list wasn't published: ${friendlyFetchError(e)}.`,true); }
   prog.hidden=true; go.disabled=false;
 }
+/* Deleting edits the list as it is on GitHub now, so a stale copy in this tab can't bring anything back. */
+let delItem=null;
+function delSay(t,bad){ $('delMsg').textContent=t; $('delMsg').className=bad?'warn':''; }
+function showOnlySongs(id){
+  const show=web.shows.find(s=>s.id===id), others=web.shows.filter(s=>s.id!==id);
+  return songsOf(show).filter(s=>!others.some(o=>o.songIds.includes(s.id)));
+}
+function openDelete(kind,id){
+  const rec=(kind==='show'?web.shows:web.songs).find(x=>x.id===id); if(!rec) return;
+  delItem={kind,id};
+  const inShows=kind==='song'?web.shows.filter(s=>s.songIds.includes(id)).length:0, only=kind==='show'?showOnlySongs(id).length:0;
+  $('delTitle').textContent=`Delete ${rec.name}?`;
+  $('delInfo').textContent=kind==='show'?'This removes the show from the web library for everyone.':`This removes the song from the web library for everyone${inShows?`, including ${inShows} show${inShows===1?'':'s'}`:''}.`;
+  $('delAlsoRow').hidden=!only; $('delAlso').checked=false;
+  $('delAlsoText').textContent=`Also delete ${only===1?'the 1 song':`the ${only} songs`} no other show uses`;
+  $('delRepo').value=defaultRepo(); $('delToken').value=ghToken; delSay('');
+  $('delClose').textContent='Cancel'; $('delGo').hidden=false; $('delGo').disabled=false;
+  $('delDlg').showModal();
+}
+async function deleteFromWeb(){
+  const repo=$('delRepo').value.trim(), go=$('delGo'), {kind,id}=delItem;
+  ghToken=$('delToken').value.trim();
+  if(!/^[\w.-]+\/[\w.-]+$/.test(repo)) return delSay('Enter the repository as owner/name.',true);
+  if(!ghToken) return delSay('Paste a GitHub token first.',true);
+  go.disabled=true; delSay('Saving the list to GitHub…');
+  try{
+    const base=`/repos/${repo}`, info=await gh(base), branch=info.default_branch;
+    const old=await gh(`${base}/contents/library/index.json?ref=${encodeURIComponent(branch)}`,{accept:'application/vnd.github.raw+json',allow404:true});
+    if(!old) throw new Error('This repository has no published list');
+    const manifest=JSON.parse(old); parseManifest(manifest,DEFAULT_MANIFEST);
+    const shows=manifest.shows||[], drop=new Set(kind==='song'?[id]:[]);
+    if(kind==='show'){
+      const show=shows.find(s=>s.id===id);
+      if(!show) throw new Error('That show is already gone from the published list');
+      if($('delAlso').checked) for(const s of show.songIds||[]) if(!shows.some(o=>o.id!==id&&(o.songIds||[]).includes(s))) drop.add(s);
+    } else if(!manifest.songs.some(s=>s.id===id)) throw new Error('That song is already gone from the published list');
+    const removed=manifest.songs.filter(s=>drop.has(s.id));
+    manifest.updatedAt=Date.now();
+    manifest.songs=manifest.songs.filter(s=>!drop.has(s.id));
+    manifest.shows=shows.filter(s=>kind!=='show'||s.id!==id).map(s=>({...s,songIds:(s.songIds||[]).filter(i=>!drop.has(i))}));
+    const tree=[{path:'library/index.json',mode:'100644',type:'blob',content:JSON.stringify(manifest,null,1)}];
+    for(const p of removed) if(/^songs\/[\w-]+\.btrack$/.test(p.file||'')) tree.push({path:`library/${p.file}`,mode:'100644',type:'blob',sha:null});
+    const label=(kind==='show'?web.shows:web.songs).find(x=>x.id===id)?.name||kind;
+    await ghCommit(base,branch,tree,`Delete ${label} from library list: ${manifest.songs.length} songs, ${manifest.shows.length} shows`);
+    try{ localStorage.setItem('backline.repo',repo); }catch{}
+    web=parseManifest(manifest,DEFAULT_MANIFEST);
+    if(!web.shows.some(s=>s.id===webSel)) webSel=web.shows[0]?.id||null;
+    if(activeShow?.web){ activeShow=web.shows.find(s=>s.id===activeShow.id)||null; renderSetbar(); }
+    renderLib();
+    delSay(`Deleted ${label}. Other people will see the change in a minute or two.`);
+    go.hidden=true; $('delClose').textContent='Close';
+  }catch(e){ delSay(`Nothing was deleted: ${friendlyFetchError(e)}.`,true); go.disabled=false; }
+}
+$('delGo').onclick=deleteFromWeb;
+$('delClose').onclick=()=>$('delDlg').close();
+$('delDlg').addEventListener('close',()=>{ ghToken=''; $('delToken').value=''; });
 $('libPublish').onclick=openPublish;
 $('pubGo').onclick=publish;
 $('pubClose').onclick=()=>{ ghToken=''; $('pubToken').value=''; $('pubDlg').close(); renderLib(); };
