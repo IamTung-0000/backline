@@ -140,6 +140,19 @@ progress{width:100%;accent-color:var(--led)}
 .foot{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .empty{color:var(--dim);margin:6px 2px;font-size:13px}
 #libSaveCur{white-space:normal;overflow-wrap:anywhere}
+.tabs{display:flex;gap:2px;background:var(--well);border-radius:5px;padding:2px}
+.tab{background:transparent;border:0;border-radius:4px;padding:6px 11px;cursor:pointer;font:600 14px/1.1 var(--label)}
+.tab.on{background:var(--led);color:#201608}
+.setTitle{font-weight:500;font-size:15px;margin:2px 2px 6px}
+#pubDlg{width:min(560px,calc(100vw - 32px))}
+#pubDlg[open]{display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 32px)}
+#pubDlg h2{margin:0}#pubDlg p{margin:0}
+#pubDlg label{display:grid;gap:3px}#pubDlg input[type=text],#pubDlg input[type=password]{width:100%}
+#pubDlg .warn,#pubMsg.warn{color:var(--solo)}
+#pubDlg a{color:var(--led)}
+#pubList{overflow:auto;flex:1;min-height:90px;max-height:240px;background:var(--well);border-radius:5px;padding:8px;display:flex;flex-direction:column;gap:5px}
+#pubList label.pubRow{display:flex;gap:8px;align-items:flex-start}
+#pubList .lbl{margin-top:4px}
 @media (max-width:980px),(max-height:620px){
   #libDlg{height:auto;max-height:calc(100vh - 24px);overflow:auto}
   .libCols{grid-template-columns:minmax(0,1fr)}
@@ -244,7 +257,11 @@ progress{width:100%;accent-color:var(--led)}
 
 <dialog id="libDlg" aria-label="Library">
   <div class="libTop">
-    <h2>Library</h2><span class="meta" id="libUse"></span><span class="spacer"></span>
+    <h2>Library</h2>
+    <div class="tabs"><button class="tab" id="tabMine">My library</button><button class="tab" id="tabWeb">Web library</button></div>
+    <span class="meta" id="libUse"></span><span class="spacer"></span>
+    <button class="btn" id="libLink" title="Open a project or library from a web address">Open from link</button>
+    <button class="btn" id="libPublish" title="Share songs and shows on this site">Publish to GitHub</button>
     <button class="btn" id="libBackup" title="Save all songs and shows as one file">Back up</button>
     <button class="btn" id="libRestore">Restore backup</button>
     <button class="btn" id="libClose">Close</button>
@@ -254,6 +271,17 @@ progress{width:100%;accent-color:var(--led)}
     <section id="libSetCol"><div class="colHead"><span class="lbl">Set list</span></div><div id="libSet"></div></section>
     <section><div class="colHead"><span class="lbl">Songs</span><button class="btn" id="libAdd">Add project files</button></div><div class="scroll" id="libSongs"></div><button class="btn primary" id="libSaveCur"></button></section>
   </div>
+</dialog>
+<dialog id="pubDlg" aria-label="Publish to GitHub">
+  <h2>Publish to GitHub</h2>
+  <p class="warn">Everyone on the web can play and download what you publish, including the audio. Publish only music you have the right to share. Git keeps old versions, so unpublishing does not erase the file from the repository's history.</p>
+  <div id="pubList"></div>
+  <label><span class="lbl">Repository</span><input id="pubRepo" type="text" spellcheck="false" autocomplete="off"></label>
+  <label><span class="lbl">GitHub token</span><input id="pubToken" type="password" autocomplete="off" spellcheck="false"></label>
+  <p class="meta"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token</a> for this repository only, with Contents set to Read and write. It is sent only to GitHub and is forgotten when you close this window.</p>
+  <progress id="pubProg" max="1" hidden></progress>
+  <p id="pubMsg" role="status"></p>
+  <div class="acts"><button type="button" class="btn" id="pubClose">Close</button><button type="button" class="btn primary" id="pubGo">Publish</button></div>
 </dialog>
 <input id="fileLib" type="file" multiple accept=".btrack" hidden>
 <input id="fileRestore" type="file" accept=".btlib" hidden>
@@ -793,13 +821,17 @@ function readProjectMeta(ab){
 }
 async function parseProject(ab){
   const u=new Uint8Array(ab), meta=readProjectMeta(ab), decoded=[];
+  if(!Array.isArray(meta.tracks)) throw new Error('it is not a Backline project');
   for(const r of meta.tracks){ const bytes=u.slice(meta._base+r.at,meta._base+r.at+r.len); decoded.push({r,bytes,buffer:await ctx.decodeAudioData(bytes.slice().buffer)}); }
   return {meta,decoded};
 }
 function applyProject({meta,decoded}){
   clearProject(); isDemo=false;
   const d=defaults(); S={...d,...meta,click:{...d.click,...meta.click},loop:{...d.loop,...meta.loop}}; for(const k of ['tracks','version','duration','_base']) delete S[k];
-  for(const {r,bytes,buffer} of decoded) addTrack(buffer,{name:r.name,color:r.color,db:r.db,pan:r.pan,mute:r.mute,solo:r.solo,locked:!!r.locked,offset:r.offset,fileName:r.fileName,mime:r.mime,bytes});
+  S.name=String(S.name||'Untitled song'); S.bpm=clamp(+S.bpm||120,20,300); S.bpb=clamp(Math.round(+S.bpb)||4,1,32); S.gridOffset=+S.gridOffset||0; S.countIn=clamp(+S.countIn||0,0,16); S.masterDb=+S.masterDb||0; S.pps=clamp(+S.pps||20,4,200);
+  S.loop={on:!!S.loop.on,a:+S.loop.a||0,b:+S.loop.b||0};
+  S.click.db=Number.isFinite(+S.click.db)?+S.click.db:-9; S.click.sub=[1,2,3,4].includes(+S.click.sub)?+S.click.sub:1; S.click.trim=clamp(+S.click.trim||0,-150,150); if(!clickBufs[S.click.sound]) S.click.sound='wood';
+  for(const {r,bytes,buffer} of decoded) addTrack(buffer,{name:String(r.name||'Track'),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:PALETTE[tracks.length%PALETTE.length],db:Number.isFinite(+r.db)?+r.db:0,pan:clamp(+r.pan||0,-1,1),mute:!!r.mute,solo:!!r.solo,locked:!!r.locked,offset:Math.max(0,+r.offset||0),fileName:String(r.fileName||''),mime:String(r.mime||''),bytes});
   syncUI(); applyLevels(); dirty=false; syncDirty(); drawTimeline();
 }
 async function openProject(file,handle){
@@ -850,47 +882,47 @@ const fmtDate=d=>{ if(!d) return 'No date'; const x=new Date(d+'T00:00'); return
 async function refreshLib(){
   lib.songs=(await dbAll('songs')).sort((a,b)=>a.name.localeCompare(b.name));
   lib.shows=(await dbAll('shows')).sort((a,b)=>(b.openedAt||b.updatedAt||0)-(a.openedAt||a.updatedAt||0));
-  if(activeShow) activeShow=lib.shows.find(s=>s.id===activeShow.id)||null;
+  if(activeShow&&!activeShow.web) activeShow=lib.shows.find(s=>s.id===activeShow.id)||null;
   renderLib(); renderSetbar();
 }
 async function saveToLibrary(){
   if(!tracks.length) return toast('Import a track first. There is nothing to save yet.');
   S.name=$('projName').value.trim()||S.name;
   try{
-    const updating=!!currentSongId, id=currentSongId||newId();
+    const updating=lib.songs.some(s=>s.id===currentSongId), id=currentSongId||newId();
     await dbPut('songs',{id,name:S.name,bpm:S.bpm,duration:duration(),updatedAt:Date.now(),blob:serialize()});
     currentSongId=id; isDemo=false; dirty=false; syncDirty(); navigator.storage?.persist?.();
     await refreshLib(); preloadNext();
     toast(updating?`Updated ${S.name} in the library.`:`Added ${S.name} to the library.`);
   }catch(e){ toast(`The song wasn't saved: ${e.message}. Free up disk space or back up and remove some songs.`,8000); }
 }
-function songsOf(show){ return (show?.songIds||[]).map(id=>lib.songs.find(s=>s.id===id)).filter(Boolean); }
-async function loadSong(id){
+function songsOf(show){ return (show?.songIds||[]).map(id=>(show?.web?web.songs:lib.songs).find(s=>s.id===id)).filter(Boolean); }
+async function loadSong(id,src){
   if(playing&&!confirm('A song is playing. Stop it and change song?')) return false;
   if(!guardDirty()) return false;
   const token=++loadToken;
   if(playing){ playing=false; halt(); syncButtons(); }
-  const rec=lib.songs.find(s=>s.id===id); if(!rec) return false;
+  const rec=findSong(id,src); if(!rec) return false;
   toast(`Loading ${rec.name}…`,0);
   try{
     const ready=preload&&preload.id===id&&preload.at===rec.updatedAt?await preload.promise:null;
-    const p=ready||await parseProject(await rec.blob.arrayBuffer());
+    const p=ready||await parseProject(await (await songBlob(rec)).arrayBuffer());
     if(token!==loadToken) return false;
     applyProject(p); currentSongId=id; S.name=rec.name; syncUI(); renderSetbar(); drawTimeline();
     toast(`Loaded ${rec.name}.`,2000); preloadNext(); return true;
-  }catch(e){ toast(`${rec.name} can't be loaded: ${e.message}.`,8000); return false; }
+  }catch(e){ toast(`${rec.name} can't be loaded: ${friendlyFetchError(e)}.`,8000); return false; }
 }
 function preloadNext(){
   preload=null;
   const list=songsOf(activeShow), i=list.findIndex(s=>s.id===currentSongId), next=list[i+1]; if(!next) return;
-  preload={id:next.id,at:next.updatedAt,promise:next.blob.arrayBuffer().then(parseProject).catch(()=>null)};
+  preload={id:next.id,at:next.updatedAt,promise:songBlob(next,true).then(b=>b.arrayBuffer()).then(parseProject).catch(()=>null)};
 }
 function renderSetbar(){
   const bar=$('setbar'); bar.hidden=!activeShow; if(!activeShow) return;
   const list=songsOf(activeShow), i=list.findIndex(s=>s.id===currentSongId);
   bar.innerHTML=`<span class="setName" title="${esc(fmtDate(activeShow.date))}">${esc(activeShow.name)}</span>
     <button class="btn" data-set="prev" ${i<=0?'disabled':''}>Previous</button>
-    <div class="chips">${list.map((s,k)=>`<button class="chip${k===i?' on':''}" data-set="song" data-id="${s.id}"><b>${k+1}</b> ${esc(s.name)}</button>`).join('')||'<span class="lbl">No songs in this show yet</span>'}</div>
+    <div class="chips">${list.map((s,k)=>`<button class="chip${k===i?' on':''}" data-set="song" data-id="${esc(s.id)}"><b>${k+1}</b> ${esc(s.name)}</button>`).join('')||'<span class="lbl">No songs in this show yet</span>'}</div>
     <button class="btn" data-set="next" ${i>=list.length-1?'disabled':''}>Next song</button>
     <button class="btn" data-set="close" title="Leave this set list. The loaded song stays open.">Close show</button>`;
   bar.querySelector('.chip.on')?.scrollIntoView({block:'nearest',inline:'center'});
@@ -904,17 +936,19 @@ $('setbar').onclick=e=>{
   else if(a==='close'){ activeShow=null; preload=null; renderSetbar(); }
 };
 function renderLib(){
+  if(libTab==='web') return renderWebLib();
+  renderTabs();
   const sel=lib.shows.find(s=>s.id===libSel);
-  $('libShows').innerHTML=lib.shows.map(s=>`<button class="row pick${s.id===libSel?' on':''}" data-act="select" data-id="${s.id}"><span class="nm">${esc(s.name)}</span><span class="meta">${esc(fmtDate(s.date))} · ${songsOf(s).length} song${songsOf(s).length===1?'':'s'}</span></button>`).join('')||'<p class="empty">No shows yet. Create one for each gig.</p>';
+  $('libShows').innerHTML=lib.shows.map(s=>`<button class="row pick${s.id===libSel?' on':''}" data-act="select" data-id="${esc(s.id)}"><span class="nm">${esc(s.name)}</span><span class="meta">${esc(fmtDate(s.date))} · ${songsOf(s).length} song${songsOf(s).length===1?'':'s'}</span></button>`).join('')||'<p class="empty">No shows yet. Create one for each gig.</p>';
   if(sel){
     const list=songsOf(sel), total=list.reduce((m,s)=>m+(s.duration||0),0);
     $('libSet').innerHTML=`<div class="edit"><label><span class="lbl">Show name</span><input type="text" id="showName" value="${esc(sel.name)}"></label><label><span class="lbl">Date</span><input type="date" id="showDate" value="${esc(sel.date||'')}"></label></div>
-      <div class="scroll">${list.map((s,i)=>`<div class="row"><b class="n">${i+1}</b><span class="nm">${esc(s.name)}<span class="meta"> ${s.bpm} BPM · ${fmtLen(s.duration)}</span></span><span class="tools"><button data-act="up" data-i="${i}" ${i?'':'disabled'} aria-label="Move up">↑</button><button data-act="down" data-i="${i}" ${i<list.length-1?'':'disabled'} aria-label="Move down">↓</button><button data-act="unset" data-i="${i}" title="Take out of this set list">Remove</button></span></div>`).join('')||'<p class="empty">Add songs from the Songs column.</p>'}</div>
+      <div class="scroll">${list.map((s,i)=>`<div class="row"><b class="n">${i+1}</b><span class="nm">${esc(s.name)}<span class="meta"> ${esc(s.bpm)} BPM · ${fmtLen(s.duration)}</span></span><span class="tools"><button data-act="up" data-i="${i}" ${i?'':'disabled'} aria-label="Move up">↑</button><button data-act="down" data-i="${i}" ${i<list.length-1?'':'disabled'} aria-label="Move down">↓</button><button data-act="unset" data-i="${i}" title="Take out of this set list">Remove</button></span></div>`).join('')||'<p class="empty">Add songs from the Songs column.</p>'}</div>
       <div class="foot"><span class="meta">${list.length} songs · ${fmtLen(total)} total</span><span class="spacer"></span><button class="btn" data-act="delshow">Delete show</button><button class="btn primary" data-act="openshow" ${list.length?'':'disabled'}>Open show</button></div>`;
   } else $('libSet').innerHTML='<p class="empty">Select a show, or create a new one, to build its set list.</p>';
   $('libSongs').innerHTML=lib.songs.map(s=>{ const inSet=sel?.songIds.includes(s.id);
-    return `<div class="row"><span class="nm">${esc(s.name)}${s.id===currentSongId?' <span class="tag">Loaded</span>':''}<span class="meta"> ${s.bpm} BPM · ${fmtLen(s.duration)}</span></span><span class="tools">${sel?`<button data-act="add" data-id="${s.id}" ${inSet?'disabled':''}>${inSet?'In set':'Add to set'}</button>`:''}<button data-act="opensong" data-id="${s.id}">Open</button><button data-act="delsong" data-id="${s.id}" aria-label="Delete ${esc(s.name)} from library">Delete</button></span></div>`; }).join('')||'<p class="empty">No songs yet. Set up a song, then press Save to library.</p>';
-  $('libSaveCur').textContent=currentSongId?`Update "${S.name}"`:`Save "${S.name}" to library`;
+    return `<div class="row"><span class="nm">${esc(s.name)}${s.id===currentSongId?' <span class="tag">Loaded</span>':''}<span class="meta"> ${esc(s.bpm)} BPM · ${fmtLen(s.duration)}</span></span><span class="tools">${sel?`<button data-act="add" data-id="${esc(s.id)}" ${inSet?'disabled':''}>${inSet?'In set':'Add to set'}</button>`:''}<button data-act="opensong" data-id="${esc(s.id)}">Open</button><button data-act="delsong" data-id="${esc(s.id)}" aria-label="Delete ${esc(s.name)} from library">Delete</button></span></div>`; }).join('')||'<p class="empty">No songs yet. Set up a song, then press Save to library.</p>';
+  $('libSaveCur').textContent=lib.songs.some(s=>s.id===currentSongId)?`Update "${S.name}"`:`Save "${S.name}" to library`;
   navigator.storage?.estimate?.().then(e=>{ $('libUse').textContent=`${(e.usage/1048576).toFixed(0)} MB used on this computer`; }).catch(()=>{});
 }
 async function putShow(s){ s.updatedAt=Date.now(); await dbPut('shows',s); await refreshLib(); preloadNext(); }
@@ -984,12 +1018,246 @@ async function restoreLibrary(f){
     const jl=new DataView(h.buffer).getUint32(5,true), meta=JSON.parse(await f.slice(9,9+jl).text()), base=9+jl;
     const songs=await dbAll('songs'), shows=await dbAll('shows'); let added=0;
     for(const s of meta.songs){
+      if(!SAFE_ID.test(s?.id)) continue;
       const cur=songs.find(x=>x.id===s.id); if(cur&&cur.updatedAt>=s.updatedAt) continue;
       const {at,len,...rec}=s; rec.blob=new Blob([await f.slice(base+at,base+at+len).arrayBuffer()]); await dbPut('songs',rec); added++;
     }
-    for(const s of meta.shows){ const cur=shows.find(x=>x.id===s.id); if(!cur||(cur.updatedAt||0)<(s.updatedAt||0)) await dbPut('shows',s); }
+    for(const s of meta.shows){ if(!SAFE_ID.test(s?.id)) continue; const cur=shows.find(x=>x.id===s.id); if(!cur||(cur.updatedAt||0)<(s.updatedAt||0)) await dbPut('shows',s); }
     await refreshLib(); toast(`Restored the backup: ${added} song${added===1?'':'s'} added or updated, ${meta.shows.length} show${meta.shows.length===1?'':'s'} checked. Newer copies here were kept.`,7000);
   }catch(err){ toast(`${f.name} can't be restored: ${err.message}.`,8000); }
+}
+
+/* ---------- web library, shared links and publishing ---------- */
+const SAFE_ID=/^[\w-]{1,80}$/, DEFAULT_MANIFEST=new URL('library/index.json',location.origin+location.pathname).href;
+let web={url:DEFAULT_MANIFEST,songs:[],shows:[],error:''}, webSel=null, libTab='mine', ghToken='', pubItems=[];
+function findSong(id,src){
+  const w=web.songs.find(s=>s.id===id), l=lib.songs.find(s=>s.id===id);
+  return src==='web'||activeShow?.web ? (w||l) : (l||w);
+}
+function friendlyFetchError(e){ return e instanceof TypeError ? "that site doesn't allow other pages to load its files, or it can't be reached" : e.message; }
+function normalizeUrl(raw){
+  let u; try{ u=new URL(String(raw).trim()); }catch{ throw new Error("that isn't a valid web address"); }
+  const gh=u.hostname==='github.com'&&u.pathname.match(/^\/([^/]+)\/([^/]+)\/(?:blob|raw)\/(.+)$/);
+  if(gh) u=new URL(`https://raw.githubusercontent.com/${gh[1]}/${gh[2]}/${gh[3]}`);
+  if(u.protocol!=='https:'&&u.origin!==location.origin) throw new Error('the address must start with https://');
+  return u.href;
+}
+async function fetchBlob(url,label){
+  const r=await fetch(url,{cache:'no-cache'});
+  if(!r.ok) throw new Error(`the server answered ${r.status}`);
+  const total=+r.headers.get('content-length')||0;
+  if(!r.body||!label) return r.blob();
+  const reader=r.body.getReader(), parts=[]; let got=0;
+  for(;;){ const {done,value}=await reader.read(); if(done) break; parts.push(value); got+=value.length;
+    toast(`Downloading ${label}… ${total&&got<=total?Math.round(got/total*100)+'%':(got/1048576).toFixed(0)+' MB'}`,0); }
+  return new Blob(parts);
+}
+async function songBlob(rec,quiet){
+  if(rec.blob) return rec.blob;
+  rec.blob=await fetchBlob(rec.url,quiet?null:rec.name);
+  return rec.blob;
+}
+function parseManifest(json,url){
+  if(!json||!Array.isArray(json.songs)) throw new Error('it is not a Backline web library');
+  const songs=json.songs.filter(s=>SAFE_ID.test(s?.id)&&typeof s.file==='string').map(s=>{
+    const u=new URL(s.file,url); if(u.protocol!=='https:'&&u.origin!==location.origin) return null;
+    return {id:s.id,name:String(s.name||'Untitled').slice(0,200),bpm:+s.bpm||0,duration:Number.isFinite(s.duration)?s.duration:null,updatedAt:+s.updatedAt||0,size:+s.size||0,file:s.file,url:u.href};
+  }).filter(Boolean);
+  const shows=(json.shows||[]).filter(s=>SAFE_ID.test(s?.id)).map(s=>({id:s.id,name:String(s.name||'Untitled show').slice(0,200),date:/^\d{4}-\d\d-\d\d$/.test(s.date)?s.date:'',songIds:(s.songIds||[]).filter(i=>typeof i==='string'&&SAFE_ID.test(i)),web:true}));
+  return {url,songs,shows,error:''};
+}
+async function loadManifest(url){
+  const r=await fetch(url,{cache:'no-cache'});
+  if(!r.ok) throw new Error(`the server answered ${r.status}`);
+  web=parseManifest(await r.json(),url);
+  if(!web.shows.some(s=>s.id===webSel)) webSel=web.shows[0]?.id||null;
+}
+async function loadFromLink(raw){
+  try{
+    const url=normalizeUrl(raw), name=decodeURIComponent(url.split('/').pop().split('?')[0])||'file';
+    const blob=await fetchBlob(url,name), ab=await blob.arrayBuffer(), u=new Uint8Array(ab);
+    if(MAGIC.every((b,i)=>u[i]===b)){
+      if(!guardDirty()) return false;
+      if(playing){ playing=false; halt(); }
+      applyProject(await parseProject(ab)); renderSetbar(); toast(`Opened ${S.name} from the web.`); return 'project';
+    }
+    if(LIBMAGIC.every((b,i)=>u[i]===b)){
+      if(!confirm(`Add the songs and shows in ${name} to your library?`)) return false;
+      await restoreLibrary(new File([blob],name)); libTab='mine'; renderLib(); return 'backup';
+    }
+    let json; try{ json=JSON.parse(new TextDecoder().decode(u)); }catch{ throw new Error('it is not a Backline project or library'); }
+    web=parseManifest(json,url); webSel=web.shows[0]?.id||null; libTab='web'; renderLib();
+    toast(`Loaded a web library with ${web.songs.length} song${web.songs.length===1?'':'s'}.`); return 'library';
+  }catch(e){ toast(`That link can't be opened: ${friendlyFetchError(e)}.`,9000); return false; }
+}
+function shareLink(kind,id){
+  const u=new URL(location.origin+location.pathname);
+  if(web.url!==DEFAULT_MANIFEST) u.searchParams.set('library',web.url);
+  u.searchParams.set(kind,id); return u.href;
+}
+async function copyLink(link){
+  try{ await navigator.clipboard.writeText(link); toast('Link copied. Anyone with it can open this.'); }
+  catch{ prompt('Copy this link:',link); }
+}
+function renderTabs(){
+  $('tabMine').classList.toggle('on',libTab==='mine'); $('tabWeb').classList.toggle('on',libTab==='web');
+  for(const id of ['libNewShow','libAdd','libSaveCur','libBackup','libRestore']) $(id).hidden=libTab==='web';
+}
+function renderWebLib(){
+  renderTabs();
+  const sel=web.shows.find(s=>s.id===webSel), host=new URL(web.url).host;
+  $('libUse').textContent=`From ${host}`;
+  const emptyMsg=web.error||'Nothing has been published here yet.';
+  $('libShows').innerHTML=web.shows.map(s=>{ const n=songsOf(s).length; return `<button class="row pick${s.id===webSel?' on':''}" data-web="select" data-id="${esc(s.id)}"><span class="nm">${esc(s.name)}</span><span class="meta">${esc(fmtDate(s.date))} · ${n} song${n===1?'':'s'}</span></button>`; }).join('')||`<p class="empty">${esc(emptyMsg)}</p>`;
+  if(sel){
+    const list=songsOf(sel), total=list.reduce((m,s)=>m+(s.duration||0),0);
+    $('libSet').innerHTML=`<div class="scroll"><p class="setTitle">${esc(sel.name)}</p>${list.map((s,i)=>`<div class="row"><b class="n">${i+1}</b><span class="nm">${esc(s.name)}<span class="meta"> ${esc(s.bpm)} BPM · ${fmtLen(s.duration)}</span></span></div>`).join('')||'<p class="empty">This show has no songs.</p>'}</div>
+      <div class="foot"><span class="meta">${list.length} songs · ${fmtLen(total)} total</span><span class="spacer"></span><button class="btn" data-web="linkshow">Copy link</button><button class="btn" data-web="saveshow" ${list.length?'':'disabled'}>Save to my library</button><button class="btn primary" data-web="openshow" ${list.length?'':'disabled'}>Open show</button></div>`;
+  } else $('libSet').innerHTML='<p class="empty">Select a show to see its set list.</p>';
+  $('libSongs').innerHTML=web.songs.map(s=>{ const mine=lib.songs.some(x=>x.id===s.id);
+    return `<div class="row"><span class="nm">${esc(s.name)}${mine?' <span class="tag">Saved</span>':''}<span class="meta"> ${esc(s.bpm)} BPM · ${fmtLen(s.duration)}${s.size?` · ${(s.size/1048576).toFixed(0)} MB`:''}</span></span><span class="tools"><button data-web="opensong" data-id="${esc(s.id)}">Open</button><button data-web="linksong" data-id="${esc(s.id)}">Copy link</button><button data-web="savesong" data-id="${esc(s.id)}">Save</button></span></div>`; }).join('')||`<p class="empty">${esc(emptyMsg)}</p>`;
+}
+async function copyWebSong(s){
+  const blob=await songBlob(s), cur=lib.songs.find(x=>x.id===s.id);
+  if(cur&&cur.updatedAt>=s.updatedAt) return false;
+  await dbPut('songs',{id:s.id,name:s.name,bpm:s.bpm,duration:s.duration,updatedAt:s.updatedAt,blob});
+  return true;
+}
+$('libDlg').addEventListener('click',async e=>{
+  const b=e.target.closest('[data-web]'); if(!b) return;
+  const a=b.dataset.web, id=b.dataset.id, sel=web.shows.find(s=>s.id===webSel);
+  try{
+    if(a==='select'){ webSel=id; renderLib(); }
+    else if(a==='opensong'){ if(await loadSong(id,'web')) $('libDlg').close(); }
+    else if(a==='linksong') copyLink(shareLink('song',id));
+    else if(a==='linkshow'&&sel) copyLink(shareLink('show',sel.id));
+    else if(a==='savesong'){ const s=web.songs.find(x=>x.id===id); const did=await copyWebSong(s); await refreshLib(); toast(did?`Saved ${s.name} to your library.`:`Your library already has this version of ${s.name}.`); }
+    else if(a==='saveshow'&&sel){
+      const exists=lib.shows.some(s=>s.id===sel.id);
+      if(exists&&!confirm(`Replace your copy of the set list "${sel.name}"?`)) return;
+      for(const s of songsOf(sel)) await copyWebSong(s);
+      const {web:_,...show}=sel; show.songIds=songsOf(sel).map(s=>s.id); show.updatedAt=Date.now(); await dbPut('shows',show); await refreshLib();
+      toast(`Saved ${sel.name} and its songs to your library.`);
+    }
+    else if(a==='openshow'&&sel) { if(await openWebShow(sel)) $('libDlg').close(); }
+  }catch(err){ toast(`That didn't work: ${friendlyFetchError(err)}.`,8000); }
+});
+async function openWebShow(show){
+  const prev=activeShow; activeShow=show;
+  const list=songsOf(show);
+  if(!await loadSong(list[0].id,'web')){ activeShow=prev; renderSetbar(); return false; }
+  renderSetbar(); return true;
+}
+$('tabMine').onclick=()=>{ libTab='mine'; renderLib(); };
+$('tabWeb').onclick=async()=>{ libTab='web'; if(!web.songs.length&&!web.shows.length){ try{ await loadManifest(web.url); }catch(e){ web.error=e.message.includes('404')?'':`The web library can't be loaded: ${friendlyFetchError(e)}.`; } } renderLib(); };
+$('libLink').onclick=()=>{ const raw=prompt('Paste a link to a .btrack project, a .btlib backup or a web library index.json:'); if(raw&&raw.trim()) loadFromLink(raw).then(r=>{ if(r==='project') $('libDlg').close(); }); };
+
+/* Publishing talks to the GitHub API directly from this page. The token stays in memory and goes nowhere else. */
+function defaultRepo(){
+  const m=location.hostname.match(/^([^.]+)\.github\.io$/), p=location.pathname.split('/').filter(Boolean)[0];
+  try{ const saved=localStorage.getItem('backline.repo'); if(saved) return saved; }catch{}
+  return m&&p?`${m[1]}/${p}`:'IamTung-0000/backline';
+}
+async function gh(path,opts={}){
+  const r=await fetch('https://api.github.com'+path,{...opts,headers:{Accept:opts.accept||'application/vnd.github+json',Authorization:`Bearer ${ghToken}`,'X-GitHub-Api-Version':'2022-11-28',...(opts.body?{'Content-Type':'application/json'}:{})}});
+  if(r.status===404&&opts.allow404) return null;
+  if(!r.ok){
+    const m=await r.json().catch(()=>({}));
+    if(r.status===401) throw new Error('GitHub rejected the token. Check it and that it has not expired');
+    if(r.status===403||r.status===404) throw new Error('This token cannot write to that repository. Give it access to the repository, with Contents set to Read and write');
+    throw new Error(m.message||`GitHub answered ${r.status}`);
+  }
+  return opts.accept?r.text():r.json();
+}
+function blobToB64(blob){ return new Promise((res,rej)=>{ const f=new FileReader(); f.onload=()=>res(f.result.slice(f.result.indexOf(',')+1)); f.onerror=()=>rej(f.error); f.readAsDataURL(blob); }); }
+const MAX_FILE=95*1048576, MAX_SITE=1000*1048576;
+async function openPublish(){
+  let cur={songs:[],shows:[]}; try{ const r=await fetch(DEFAULT_MANIFEST,{cache:'no-cache'}); if(r.ok) cur=parseManifest(await r.json(),DEFAULT_MANIFEST); }catch{}
+  await refreshLib();
+  const onWeb=id=>cur.songs.some(s=>s.id===id), showOnWeb=id=>cur.shows.some(s=>s.id===id);
+  pubItems=[
+    ...lib.shows.map(s=>({kind:'show',id:s.id,name:s.name,rec:s,on:showOnWeb(s.id)})),
+    ...cur.shows.filter(s=>!lib.shows.some(x=>x.id===s.id)).map(s=>({kind:'show',id:s.id,name:s.name,rec:s,on:true,webOnly:true})),
+    ...lib.songs.map(s=>({kind:'song',id:s.id,name:s.name,rec:s,on:onWeb(s.id)})),
+    ...cur.songs.filter(s=>!lib.songs.some(x=>x.id===s.id)).map(s=>({kind:'song',id:s.id,name:s.name,rec:s,on:true,webOnly:true})),
+  ];
+  const row=(it,i)=>`<label class="pubRow"><input type="checkbox" data-i="${i}" ${it.on?'checked':''}><span>${esc(it.name)}${it.webOnly?' <span class="meta">(only on the web)</span>':''}${it.kind==='song'?` <span class="meta">${((it.rec.blob?.size||it.rec.size||0)/1048576).toFixed(1)} MB</span>`:''}</span></label>`;
+  const part=k=>pubItems.map((it,i)=>it.kind===k?row(it,i):'').join('');
+  $('pubList').innerHTML=(pubItems.some(i=>i.kind==='show')?`<p class="lbl">Shows, with their songs</p>${part('show')}`:'')+(pubItems.some(i=>i.kind==='song')?`<p class="lbl">Songs</p>${part('song')}`:'')||'<p class="empty">Your library is empty. Save a song to it first.</p>';
+  $('pubRepo').value=defaultRepo(); $('pubToken').value=ghToken; $('pubProg').hidden=true; $('pubMsg').textContent='Checked items are published. Unchecking an item takes it off the site.'; $('pubMsg').className='';
+  $('pubDlg').showModal();
+}
+function selectedForPublish(){
+  const boxes=[...$('pubList').querySelectorAll('input[type=checkbox]')].filter(b=>b.checked).map(b=>pubItems[+b.dataset.i]);
+  const shows=boxes.filter(i=>i.kind==='show').map(i=>i.rec), ids=new Set(boxes.filter(i=>i.kind==='song').map(i=>i.id));
+  for(const s of shows) for(const id of s.songIds) ids.add(id);
+  return {shows,ids};
+}
+async function publish(){
+  const repo=$('pubRepo').value.trim(), msg=$('pubMsg'), prog=$('pubProg'), go=$('pubGo');
+  const say=(t,bad)=>{ msg.textContent=t; msg.className=bad?'warn':''; };
+  ghToken=$('pubToken').value.trim();
+  if(!/^[\w.-]+\/[\w.-]+$/.test(repo)) return say('Enter the repository as owner/name.',true);
+  if(!ghToken) return say('Paste a GitHub token first.',true);
+  const {shows,ids}=selectedForPublish();
+  go.disabled=true; prog.hidden=false; prog.removeAttribute('value');
+  try{
+    say('Contacting GitHub…');
+    const base=`/repos/${repo}`, info=await gh(base), branch=info.default_branch;
+    const old=await gh(`${base}/contents/library/index.json?ref=${encodeURIComponent(branch)}`,{accept:'application/vnd.github.raw+json',allow404:true});
+    const prior=old?parseManifest(JSON.parse(old),DEFAULT_MANIFEST):{songs:[],shows:[]};
+    const songs=[]; const missing=[];
+    for(const id of ids){
+      const l=lib.songs.find(s=>s.id===id), p=prior.songs.find(s=>s.id===id);
+      if(l) songs.push(l); else if(p) songs.push(p); else missing.push(id);
+    }
+    const big=songs.find(s=>(s.blob?.size||s.size||0)>MAX_FILE);
+    if(big) throw new Error(`${big.name} is over GitHub's 100 MB file limit. Convert its tracks to MP3 and save it again`);
+    const total=songs.reduce((m,s)=>m+(s.blob?.size||s.size||0),0);
+    if(total>MAX_SITE) throw new Error(`The selection is ${(total/1048576).toFixed(0)} MB, over the 1 GB GitHub Pages limit. Publish fewer songs`);
+    const tree=[], entries=[]; let done=0, sizeDone=0;
+    const uploads=songs.filter(s=>{ const p=prior.songs.find(x=>x.id===s.id); return s.blob&&!(p&&p.updatedAt===s.updatedAt); });
+    const upTotal=uploads.reduce((m,s)=>m+s.blob.size,0)||1;
+    for(const s of songs){
+      const file=`songs/${s.id}.btrack`, p=prior.songs.find(x=>x.id===s.id);
+      entries.push({id:s.id,name:s.name,bpm:s.bpm,duration:s.duration,updatedAt:s.updatedAt,size:s.blob?.size||s.size||0,file});
+      if(!uploads.includes(s)) continue;
+      say(`Uploading ${s.name} (${++done} of ${uploads.length})…`); prog.value=sizeDone/upTotal;
+      const {sha}=await gh(`${base}/git/blobs`,{method:'POST',body:JSON.stringify({content:await blobToB64(s.blob),encoding:'base64'})});
+      tree.push({path:`library/${file}`,mode:'100644',type:'blob',sha}); sizeDone+=s.blob.size;
+    }
+    for(const p of prior.songs) if(!ids.has(p.id)&&/^songs\/[\w-]+\.btrack$/.test(p.file)) tree.push({path:`library/${p.file}`,mode:'100644',type:'blob',sha:null});
+    const manifest={version:1,updatedAt:Date.now(),songs:entries,shows:shows.map(s=>({id:s.id,name:s.name,date:s.date||'',songIds:s.songIds.filter(i=>ids.has(i)&&!missing.includes(i))}))};
+    tree.push({path:'library/index.json',mode:'100644',type:'blob',content:JSON.stringify(manifest,null,1)});
+    say('Saving to GitHub…'); prog.removeAttribute('value');
+    const ref=await gh(`${base}/git/ref/heads/${encodeURIComponent(branch)}`), parent=ref.object.sha, commit=await gh(`${base}/git/commits/${parent}`);
+    const newTree=await gh(`${base}/git/trees`,{method:'POST',body:JSON.stringify({base_tree:commit.tree.sha,tree})});
+    const newCommit=await gh(`${base}/git/commits`,{method:'POST',body:JSON.stringify({message:`Update web library: ${entries.length} songs, ${manifest.shows.length} shows`,tree:newTree.sha,parents:[parent]})});
+    await gh(`${base}/git/refs/heads/${encodeURIComponent(branch)}`,{method:'PATCH',body:JSON.stringify({sha:newCommit.sha})});
+    try{ localStorage.setItem('backline.repo',repo); }catch{}
+    prog.hidden=true;
+    say(`Published ${entries.length} song${entries.length===1?'':'s'} and ${manifest.shows.length} show${manifest.shows.length===1?'':'s'}. The site updates in a minute or two. Then press Web library to see it.`);
+    web={url:DEFAULT_MANIFEST,songs:[],shows:[],error:''};
+  }catch(e){ prog.hidden=true; say(`Nothing was published: ${friendlyFetchError(e)}.`,true); }
+  go.disabled=false;
+}
+$('libPublish').onclick=openPublish;
+$('pubGo').onclick=publish;
+$('pubClose').onclick=()=>{ ghToken=''; $('pubToken').value=''; $('pubDlg').close(); renderLib(); };
+async function bootWeb(){
+  const q=new URLSearchParams(location.search), project=q.get('project'), library=q.get('library'), show=q.get('show'), song=q.get('song');
+  try{ await refreshLib(); }catch{}
+  if(project){ await loadFromLink(project); return; }
+  try{
+    if(library) web=parseManifest(await (await fetch(normalizeUrl(library),{cache:'no-cache'})).json(),normalizeUrl(library));
+    else await loadManifest(DEFAULT_MANIFEST);
+    webSel=web.shows[0]?.id||null;
+  }catch(e){ if(library||show||song) toast(`That shared link can't be opened: ${friendlyFetchError(e)}.`,9000); return; }
+  const target=show&&web.shows.find(s=>s.id===show);
+  if(target&&songsOf(target).length) await openWebShow(target);
+  else if(song&&web.songs.some(s=>s.id===song)) await loadSong(song,'web');
+  else if(show||song) toast("That shared song or show is no longer published.",8000);
+  else if(web.songs.length){ toast(`${web.songs.length} shared song${web.songs.length===1?' is':'s are'} available. Open Library, then Web library.`,6000); if(!lib.songs.length) libTab='web'; }
 }
 
 /* ---------- controls ---------- */
@@ -1056,7 +1324,7 @@ addEventListener('dragleave',()=>{ if(--dragDepth<=0){ dragDepth=0; $('drop').hi
 addEventListener('dragover',e=>e.preventDefault());
 addEventListener('drop',e=>{ e.preventDefault(); dragDepth=0; $('drop').hidden=true; importFiles(e.dataTransfer.files); });
 let toastT;
-function toast(msg,ms=3800){ const el=$('toast'), host=$('libDlg').open?$('libDlg'):$('expDlg').open?$('expDlg'):document.body; if(el.parentNode!==host) host.append(el); el.textContent=msg; el.hidden=false; clearTimeout(toastT); if(ms) toastT=setTimeout(()=>el.hidden=true,ms); }
+function toast(msg,ms=3800){ const el=$('toast'), host=$('pubDlg').open?$('pubDlg'):$('libDlg').open?$('libDlg'):$('expDlg').open?$('expDlg'):document.body; if(el.parentNode!==host) host.append(el); el.textContent=msg; el.hidden=false; clearTimeout(toastT); if(ms) toastT=setTimeout(()=>el.hidden=true,ms); }
 
 /* ---------- demo song, so the first view shows a working mix ---------- */
 function makeDemo(){
@@ -1097,6 +1365,7 @@ requestAnimationFrame(()=>{ fitZoom(); drawTimeline(); });
   if(saved?.click&&[...$('clickOut').options].some(o=>o.value===saved.click)) await setClickRoute(saved.click,true);
 })();
 requestAnimationFrame(frame);
+bootWeb();
 </script>
 <script>function lamejs(){function X(c){return new Int32Array(c)}function K(c){return new Float32Array(c)}function ca(c){if(1==c.length)return K(c[0]);var k=c[0];c=c.slice(1);for(var n=[],u=0;u<k;u++)n.push(ca(c));return n}function Ia(c){if(1==c.length)return X(c[0]);var k=c[0];c=c.slice(1);for(var n=[],u=0;u<k;u++)n.push(Ia(c));return n}function dc(c){if(1==c.length)return new Int16Array(c[0]);var k=c[0];c=c.slice(1);for(var n=[],u=0;u<k;u++)n.push(dc(c));return n}function Ob(c){if(1==c.length)return Array(c[0]);
 var k=c[0];c=c.slice(1);for(var n=[],u=0;u<k;u++)n.push(Ob(c));return n}function ra(c){this.ordinal=c}function G(c){this.ordinal=c}function la(c){this.ordinal=function(){return c}}function mc(){this.getLameVersion=function(){return"3.98.4"};this.getLameShortVersion=function(){return"3.98.4"};this.getLameVeryShortVersion=function(){return"LAME3.98r"};this.getPsyVersion=function(){return"0.93"};this.getLameUrl=function(){return"http://www.mp3dev.org/"};this.getLameOsBitness=function(){return"32bits"}}
