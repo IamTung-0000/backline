@@ -1381,6 +1381,36 @@ $('delDlg').addEventListener('close',()=>{ ghToken=''; $('delToken').value=''; }
 $('libPublish').onclick=openPublish;
 $('pubGo').onclick=publish;
 $('pubClose').onclick=()=>{ ghToken=''; $('pubToken').value=''; $('pubDlg').close(); renderLib(); };
+/* GitHub Pages lets browsers reuse this page for 10 minutes, so compare the stored copy with the site's before starting. */
+const UPDATE_RECHECK=5*60*1000;
+let pageText=null, updateCheckedAt=0;
+async function readPage(cache){
+  const stop=new AbortController(), timer=setTimeout(()=>stop.abort(),4000);
+  try{ const r=await fetch(location.pathname,{cache,signal:stop.signal}); if(!r.ok) throw new Error(r.status); return await r.text(); }
+  finally{ clearTimeout(timer); }
+}
+async function updateOnStart(){
+  try{
+    pageText=await readPage('force-cache'); updateCheckedAt=Date.now();
+    const latest=await readPage('no-cache');
+    if(latest===pageText) return false;
+    pageText=latest;
+    if(dirty||playing) return false;
+    const last=+sessionStorage.getItem('backline.updated')||0;
+    if(Date.now()-last<60000) return false;
+    sessionStorage.setItem('backline.updated',Date.now());
+    location.reload(); return true;
+  }catch{ return false; }
+}
+/* An open tab never reloads by itself, since it may be playing a show. */
+document.addEventListener('visibilitychange',async()=>{
+  if(document.hidden||!pageText||Date.now()-updateCheckedAt<UPDATE_RECHECK) return;
+  updateCheckedAt=Date.now();
+  try{
+    const latest=await readPage('no-cache');
+    if(latest!==pageText){ pageText=latest; toast('A new version of Backline is ready. Reload the page when you finish.',12000); }
+  }catch{}
+});
 async function bootWeb(){
   const q=new URLSearchParams(location.search), project=q.get('project'), library=q.get('library'), show=q.get('show'), song=q.get('song');
   try{ await refreshLib(); }catch{}
@@ -1595,7 +1625,7 @@ requestAnimationFrame(()=>{ fitZoom(); drawTimeline(); });
   if(saved?.click&&[...$('clickOut').options].some(o=>o.value===saved.click)) await setClickRoute(saved.click,true);
 })();
 requestAnimationFrame(frame);
-bootWeb();
+updateOnStart().then(reloading=>{ if(!reloading) bootWeb(); });
 </script>
 <script>function lamejs(){function X(c){return new Int32Array(c)}function K(c){return new Float32Array(c)}function ca(c){if(1==c.length)return K(c[0]);var k=c[0];c=c.slice(1);for(var n=[],u=0;u<k;u++)n.push(ca(c));return n}function Ia(c){if(1==c.length)return X(c[0]);var k=c[0];c=c.slice(1);for(var n=[],u=0;u<k;u++)n.push(Ia(c));return n}function dc(c){if(1==c.length)return new Int16Array(c[0]);var k=c[0];c=c.slice(1);for(var n=[],u=0;u<k;u++)n.push(dc(c));return n}function Ob(c){if(1==c.length)return Array(c[0]);
 var k=c[0];c=c.slice(1);for(var n=[],u=0;u<k;u++)n.push(Ob(c));return n}function ra(c){this.ordinal=c}function G(c){this.ordinal=c}function la(c){this.ordinal=function(){return c}}function mc(){this.getLameVersion=function(){return"3.98.4"};this.getLameShortVersion=function(){return"3.98.4"};this.getLameVeryShortVersion=function(){return"LAME3.98r"};this.getPsyVersion=function(){return"0.93"};this.getLameUrl=function(){return"http://www.mp3dev.org/"};this.getLameOsBitness=function(){return"32bits"}}
