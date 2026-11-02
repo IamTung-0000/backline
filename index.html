@@ -144,6 +144,9 @@ progress{width:100%;accent-color:var(--led)}
 .tab{background:transparent;border:0;border-radius:4px;padding:6px 11px;cursor:pointer;font:600 14px/1.1 var(--label)}
 .tab.on{background:var(--led);color:#201608}
 .setTitle{font-weight:500;font-size:15px;margin:2px 2px 6px}
+#cmpDlg[open]{display:flex;flex-direction:column;gap:10px}
+#cmpDlg h2,#cmpDlg p{margin:0}#cmpDlg label{display:grid;gap:3px}#cmpDlg select{width:100%}
+#cmpDlg .warn,#cmpMsg.warn{color:var(--solo)}
 #pubDlg{width:min(560px,calc(100vw - 32px))}
 #pubDlg[open]{display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 32px)}
 #pubDlg h2{margin:0}#pubDlg p{margin:0}
@@ -262,6 +265,7 @@ progress{width:100%;accent-color:var(--led)}
     <span class="meta" id="libUse"></span><span class="spacer"></span>
     <button class="btn" id="libLink" title="Open a project or library from a web address">Open from link</button>
     <button class="btn" id="libPublish" title="Share songs and shows on this site">Publish to GitHub</button>
+    <button class="btn" id="libCompress" title="Convert WAV tracks to MP3 to save space">Compress audio</button>
     <button class="btn" id="libBackup" title="Save all songs and shows as one file">Back up</button>
     <button class="btn" id="libRestore">Restore backup</button>
     <button class="btn" id="libClose">Close</button>
@@ -271,6 +275,15 @@ progress{width:100%;accent-color:var(--led)}
     <section id="libSetCol"><div class="colHead"><span class="lbl">Set list</span></div><div id="libSet"></div></section>
     <section><div class="colHead"><span class="lbl">Songs</span><button class="btn" id="libAdd">Add project files</button></div><div class="scroll" id="libSongs"></div><button class="btn primary" id="libSaveCur"></button></section>
   </div>
+</dialog>
+<dialog id="cmpDlg" aria-label="Compress audio">
+  <h2>Compress audio</h2>
+  <p class="warn">This replaces WAV tracks with MP3 for good, and MP3 loses some audio quality. Press Back up first if you want to keep the originals. Tracks that are already MP3 are left alone.</p>
+  <label><span class="lbl">Songs</span><select id="cmpScope"><option value="all">All songs in my library</option><option value="open">Only the open song</option></select></label>
+  <label><span class="lbl">MP3 quality</span><select id="cmpKbps"><option value="128">128 kbps (smallest)</option><option value="192">192 kbps</option><option value="256">256 kbps</option><option value="320" selected>320 kbps (best quality)</option></select></label>
+  <progress id="cmpProg" max="1" value="0" hidden></progress>
+  <p id="cmpMsg" role="status"></p>
+  <div class="acts"><button type="button" class="btn" id="cmpClose">Close</button><button type="button" class="btn primary" id="cmpGo">Compress</button></div>
 </dialog>
 <dialog id="pubDlg" aria-label="Publish to GitHub">
   <h2>Publish to GitHub</h2>
@@ -797,7 +810,7 @@ function serialize(){
   const list=tracks.map(t=>{
     let bytes=t.bytes;
     if(!bytes){ const L=t.buffer.getChannelData(0), R=t.buffer.numberOfChannels>1?t.buffer.getChannelData(1):L; bytes=t.bytes=encodeWav(L,R,t.buffer.sampleRate,16); t.fileName=t.name+'.wav'; t.mime='audio/wav'; }
-    const rec={name:t.name,color:t.color,db:t.db,pan:t.pan,mute:t.mute,solo:t.solo,locked:t.locked,offset:t.offset,fileName:t.fileName,mime:t.mime,at:off,len:bytes.length};
+    const rec={name:t.name,color:t.color,db:t.db,pan:t.pan,mute:t.mute,solo:t.solo,locked:t.locked,offset:t.offset,fileName:t.fileName,mime:t.mime,trim:t.trim||0,keep:t.keep||0,at:off,len:bytes.length};
     parts.push(bytes); off+=bytes.length; return rec;
   });
   const json=new TextEncoder().encode(JSON.stringify({version:1,...S,duration:duration(),tracks:list})), head=new Uint8Array(4); new DataView(head.buffer).setUint32(0,json.length,true);
@@ -822,7 +835,7 @@ function readProjectMeta(ab){
 async function parseProject(ab){
   const u=new Uint8Array(ab), meta=readProjectMeta(ab), decoded=[];
   if(!Array.isArray(meta.tracks)) throw new Error('it is not a Backline project');
-  for(const r of meta.tracks){ const bytes=u.slice(meta._base+r.at,meta._base+r.at+r.len); decoded.push({r,bytes,buffer:await ctx.decodeAudioData(bytes.slice().buffer)}); }
+  for(const r of meta.tracks){ const bytes=u.slice(meta._base+r.at,meta._base+r.at+r.len); decoded.push({r,bytes,buffer:alignTrack(await ctx.decodeAudioData(bytes.slice().buffer),r)}); }
   return {meta,decoded};
 }
 function applyProject({meta,decoded}){
@@ -831,7 +844,7 @@ function applyProject({meta,decoded}){
   S.name=String(S.name||'Untitled song'); S.bpm=clamp(+S.bpm||120,20,300); S.bpb=clamp(Math.round(+S.bpb)||4,1,32); S.gridOffset=+S.gridOffset||0; S.countIn=clamp(+S.countIn||0,0,16); S.masterDb=+S.masterDb||0; S.pps=clamp(+S.pps||20,4,200);
   S.loop={on:!!S.loop.on,a:+S.loop.a||0,b:+S.loop.b||0};
   S.click.db=Number.isFinite(+S.click.db)?+S.click.db:-9; S.click.sub=[1,2,3,4].includes(+S.click.sub)?+S.click.sub:1; S.click.trim=clamp(+S.click.trim||0,-150,150); if(!clickBufs[S.click.sound]) S.click.sound='wood';
-  for(const {r,bytes,buffer} of decoded) addTrack(buffer,{name:String(r.name||'Track'),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:PALETTE[tracks.length%PALETTE.length],db:Number.isFinite(+r.db)?+r.db:0,pan:clamp(+r.pan||0,-1,1),mute:!!r.mute,solo:!!r.solo,locked:!!r.locked,offset:Math.max(0,+r.offset||0),fileName:String(r.fileName||''),mime:String(r.mime||''),bytes});
+  for(const {r,bytes,buffer} of decoded) addTrack(buffer,{name:String(r.name||'Track'),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:PALETTE[tracks.length%PALETTE.length],db:Number.isFinite(+r.db)?+r.db:0,pan:clamp(+r.pan||0,-1,1),mute:!!r.mute,solo:!!r.solo,locked:!!r.locked,offset:Math.max(0,+r.offset||0),fileName:String(r.fileName||''),mime:String(r.mime||''),trim:+r.trim||0,keep:+r.keep||0,bytes});
   syncUI(); applyLevels(); dirty=false; syncDirty(); drawTimeline();
 }
 async function openProject(file,handle){
@@ -1101,7 +1114,7 @@ async function copyLink(link){
 }
 function renderTabs(){
   $('tabMine').classList.toggle('on',libTab==='mine'); $('tabWeb').classList.toggle('on',libTab==='web');
-  for(const id of ['libNewShow','libAdd','libSaveCur','libBackup','libRestore']) $(id).hidden=libTab==='web';
+  for(const id of ['libNewShow','libAdd','libSaveCur','libBackup','libRestore','libCompress']) $(id).hidden=libTab==='web';
 }
 function renderWebLib(){
   renderTabs();
@@ -1259,6 +1272,94 @@ async function bootWeb(){
   else if(show||song) toast("That shared song or show is no longer published.",8000);
   else if(web.songs.length){ toast(`${web.songs.length} shared song${web.songs.length===1?' is':'s are'} available. Open Library, then Web library.`,6000); if(!lib.songs.length) libTab='web'; }
 }
+
+/* ---------- compress WAV tracks to MP3 ---------- */
+const isWav=b=>b.length>12&&String.fromCharCode(b[0],b[1],b[2],b[3])==='RIFF'&&String.fromCharCode(b[8],b[9],b[10],b[11])==='WAVE';
+const delayCache={};
+/* MP3 adds silence at the start. Measure how much with a test signal, so compressed tracks stay in time with the click. */
+async function mp3Delay(rate,kbps){
+  const key=rate+':'+kbps; if(delayCache[key]!=null) return delayCache[key];
+  const n=rate*2, a=new Float32Array(n); let seed=1;
+  for(let i=rate>>2;i<n-(rate>>2);i++){ seed=(seed*16807)%2147483647; a[i]=(seed/2147483647*2-1)*.5; }
+  const blob=await encodeMp3(a,a,rate,kbps,()=>{}), d=(await ctx.decodeAudioData(await blob.arrayBuffer())).getChannelData(0);
+  const from=rate>>1, win=4096; let best=0, lag=0;
+  for(let l=0;l<8192;l++){ let s=0; for(let i=0;i<win;i++) s+=a[from+i]*d[from+i+l]; if(s>best){best=s;lag=l;} }
+  return delayCache[key]=lag;
+}
+function alignTrack(buf,r){
+  const trim=+r.trim||0, keep=+r.keep||0; if(!trim&&!keep) return buf;
+  const rate=buf.sampleRate, start=Math.round(trim*rate), len=keep?Math.round(keep*rate):buf.length-start;
+  const out=new AudioBuffer({length:Math.max(1,len),sampleRate:rate,numberOfChannels:buf.numberOfChannels});
+  for(let c=0;c<buf.numberOfChannels;c++) out.getChannelData(c).set(buf.getChannelData(c).subarray(start,start+len));
+  return out;
+}
+async function compressProject(blob,kbps,onStep,cancelled){
+  const ab=await blob.arrayBuffer(), u=new Uint8Array(ab), meta=readProjectMeta(ab), base=meta._base, parts=[]; let changed=0, off=0;
+  for(const r of meta.tracks){
+    if(cancelled()) throw new Error('cancelled');
+    let bytes=u.subarray(base+r.at,base+r.at+r.len);
+    if(isWav(bytes)){
+      const buf=await ctx.decodeAudioData(bytes.slice().buffer), rate=buf.sampleRate;
+      if(![32000,44100,48000].includes(rate)) throw new Error(`MP3 doesn't support ${rate} Hz audio`);
+      const L=buf.getChannelData(0), R=buf.numberOfChannels>1?buf.getChannelData(1):L, delay=await mp3Delay(rate,kbps);
+      const mp3=new Uint8Array(await (await encodeMp3(L,R,rate,kbps,p=>onStep(r.name,p))).arrayBuffer());
+      if(mp3.length<bytes.length){
+        bytes=mp3; r.trim=delay/rate; r.keep=buf.length/rate; r.mime='audio/mpeg'; r.fileName=String(r.fileName||r.name||'track').replace(/\.[^.]*$/,'')+'.mp3'; changed++;
+      }
+    }
+    r.at=off; r.len=bytes.length; off+=bytes.length; parts.push(bytes);
+  }
+  if(!changed) return {blob,changed:0};
+  delete meta._base;
+  const json=new TextEncoder().encode(JSON.stringify(meta)), head=new Uint8Array(4); new DataView(head.buffer).setUint32(0,json.length,true);
+  return {blob:new Blob([MAGIC,head,json,...parts],{type:'application/octet-stream'}),changed};
+}
+let cmpRunning=false, cmpCancel=false;
+$('libCompress').onclick=async()=>{
+  await refreshLib();
+  $('cmpScope').querySelector('[value=all]').disabled=!lib.songs.length;
+  $('cmpScope').value=lib.songs.length?'all':'open';
+  $('cmpScope').querySelector('[value=open]').disabled=!tracks.length;
+  $('cmpProg').hidden=true; $('cmpMsg').textContent=''; $('cmpMsg').className=''; $('cmpGo').disabled=false; $('cmpClose').textContent='Close';
+  $('cmpDlg').showModal();
+};
+$('cmpDlg').addEventListener('cancel',e=>{ if(cmpRunning){ e.preventDefault(); cmpCancel=true; } });
+$('cmpClose').onclick=()=>{ if(cmpRunning){ cmpCancel=true; return; } $('cmpDlg').close(); renderLib(); };
+$('cmpGo').onclick=async()=>{
+  const kbps=+$('cmpKbps').value, scope=$('cmpScope').value, msg=$('cmpMsg'), prog=$('cmpProg');
+  const say=(t,bad)=>{ msg.textContent=t; msg.className=bad?'warn':''; };
+  const openInLib=lib.songs.some(s=>s.id===currentSongId), hitsOpen=openInLib||scope==='open';
+  if(playing&&hitsOpen) return say('Stop playback first, then compress.',true);
+  if(dirty&&openInLib&&(scope==='all'||scope==='open')) return say('The open song has unsaved changes. Press Save to library first.',true);
+  cmpRunning=true; cmpCancel=false; $('cmpGo').disabled=true; $('cmpClose').textContent='Stop'; prog.hidden=false; prog.value=0;
+  let before=0, after=0, done=0, same=0; const failed=[]; let stopped=false;
+  const targets=scope==='all'?lib.songs:scope==='open'&&openInLib?lib.songs.filter(s=>s.id===currentSongId):[null];
+  for(let i=0;i<targets.length&&!stopped;i++){
+    const rec=targets[i], name=rec?.name||S.name;
+    try{
+      const src=rec?rec.blob:serialize();
+      const res=await compressProject(src,kbps,(t,p)=>{ say(`${name} (song ${i+1} of ${targets.length}): compressing ${t}…`); prog.value=(i+p)/targets.length; },()=>cmpCancel);
+      before+=src.size; after+=res.blob.size;
+      if(!res.changed){ same++; continue; }
+      if(rec){
+        await dbPut('songs',{...rec,updatedAt:Date.now(),blob:res.blob}); done++;
+        if(rec.id===currentSongId){ applyProject(await parseProject(await res.blob.arrayBuffer())); currentSongId=rec.id; S.name=rec.name; syncUI(); }
+      } else {
+        const handle=fileHandle; applyProject(await parseProject(await res.blob.arrayBuffer())); fileHandle=handle; markDirty(); done++;
+      }
+    }catch(e){ if(cmpCancel&&e.message==='cancelled') stopped=true; else failed.push(`${name} (${e.message})`); }
+  }
+  await refreshLib(); preloadNext(); drawTimeline();
+  cmpRunning=false; $('cmpClose').textContent='Close'; $('cmpGo').disabled=false; prog.hidden=true;
+  const mb=n=>(n/1048576).toFixed(1)+' MB';
+  let text=done?`Compressed ${done} song${done===1?'':'s'}: ${mb(before)} is now ${mb(after)}.`:'Nothing was compressed.';
+  if(same) text+=` ${same} song${same===1?' has':'s have'} no WAV tracks left to compress.`;
+  if(stopped) text+=' Stopped early; finished songs stay compressed.';
+  if(!rec0(targets)&&done) text+=' Save the project to keep this.';
+  if(failed.length) text+=` Not compressed: ${failed.join(', ')}.`;
+  say(text,failed.length>0);
+};
+const rec0=t=>t[0]!==null;
 
 /* ---------- controls ---------- */
 function syncButtons(){
