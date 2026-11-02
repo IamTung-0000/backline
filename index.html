@@ -51,6 +51,8 @@ header{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;padding:8px m
 #click.on{background:var(--click);border-color:var(--click);color:#2a0c07}
 .field{display:flex;flex-direction:column;gap:5px;justify-content:center}
 .field .row{display:flex;gap:5px;align-items:center}
+#tempoLock.on{background:var(--led);border-color:var(--led);color:#201608}
+#bpm[disabled]{opacity:.75}
 #bpm{width:74px;font-size:17px;color:var(--led)}
 #grid{width:78px}
 
@@ -198,8 +200,9 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
     <button class="key" id="loop" title="Loop the marked region (L). Drag on the ruler to mark it." aria-label="Loop"><svg viewBox="0 0 20 20"><path d="M5 6h8V3l5 4.5L13 12V9H6v3H3V8a2 2 0 012-2zm10 8H7v3l-5-4.5L7 8v3h7V8h3v4a2 2 0 01-2 2z"/></svg></button>
     <button class="key" id="click" title="Metronome on or off (C)" aria-label="Metronome"><svg viewBox="0 0 20 20"><path d="M8 2h4l4 16H4zM9.2 4l-.8 3.5h3.2L10.8 4zM8 9.5l-1.6 6.5h7.2L12 9.5z"/></svg></button>
   </div>
-  <div class="field"><label class="lbl" for="bpm">Tempo</label><div class="row"><input id="bpm" type="number" min="20" max="300" step="0.1"><button class="btn" id="tap" title="Tap this in time with the song (T)">Tap</button></div></div>
+  <div class="field"><label class="lbl" for="bpm">Tempo</label><div class="row"><input id="bpm" type="number" min="20" max="300" step="0.1"><button class="btn" id="tap" title="Tap this in time with the song (T)">Tap</button><button class="btn" id="tempoLock" title="Lock the tempo so it can't be changed by accident" aria-pressed="false">Lock</button></div></div>
   <div class="field"><label class="lbl" for="bpb">Beats per bar</label><select id="bpb"></select></div>
+  <div class="field"><label class="lbl" for="snap">Snap</label><select id="snap" title="Grid for dragging tracks, marking loops and clicking the ruler. Hold Shift to do the opposite for one drag."><option value="off">Off</option><option value="bar">Bar</option><option value="beat">Beat</option><option value="1/2">1/2 beat</option><option value="1/4">1/4 beat</option></select></div>
   <div class="field"><label class="lbl" for="countIn">Count-in</label><select id="countIn"><option value="0">None</option><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option></select></div>
   <div class="field"><label class="lbl" for="grid">First beat at (sec)</label><div class="row"><input id="grid" type="number" step="0.001"><button class="btn" id="gridHere" title="Line up the click with the playhead">Set here</button></div></div>
 </section>
@@ -325,7 +328,7 @@ const fmtDb = db => db <= -119 ? '-inf' : (db > 0 ? '+' : '') + db.toFixed(1);
 /* ---------- project state ---------- */
 const defaults = () => ({name:'Untitled song', bpm:120, bpb:4, gridOffset:0, countIn:0, clickOn:true,
   click:{db:-9, mute:false, sound:'wood', sub:1, accent:true, trim:0},
-  masterDb:0, loop:{on:false,a:0,b:0}, pps:20});
+  masterDb:0, loop:{on:false,a:0,b:0}, pps:20, tempoLocked:false, snap:'beat'});
 let S = defaults(), tracks = [], isDemo = false, dirty = false, fileHandle = null, nextId = 1;
 
 /* ---------- audio graph ---------- */
@@ -624,7 +627,11 @@ function paint(){
     g.fillText('Drop MP3 or WAV files here, or use Import audio. Press play for the click alone.',w/2,RULER+60); g.textAlign='left';
   }
 }
-function snapBeat(t){ return S.gridOffset+Math.round((t-S.gridOffset)/beatSec())*beatSec(); }
+function snapTime(t,shift){
+  const mode=shift?(S.snap==='off'?'beat':'off'):S.snap;
+  const step={bar:beatSec()*S.bpb,beat:beatSec(),'1/2':beatSec()/2,'1/4':beatSec()/4}[mode];
+  return step?Math.max(0,S.gridOffset+Math.round((t-S.gridOffset)/step)*step):Math.max(0,t);
+}
 function fitZoom(){ const d=duration(); if(d>0){ S.pps=clamp(($('tl').clientWidth-24)/d,4,200); $('zoom').value=S.pps; } }
 let drag=null;
 cv.addEventListener('pointerdown',e=>{
@@ -641,12 +648,12 @@ cv.addEventListener('pointermove',e=>{
   const x=e.clientX-cv.getBoundingClientRect().left, t=(x+$('tl').scrollLeft)/S.pps;
   if(Math.abs(x-drag.x0)>4) drag.moved=true;
   if(!drag.moved) return;
-  if(drag.kind==='ruler'){ const a=snapBeat(Math.min(drag.t0,t)), b=snapBeat(Math.max(drag.t0,t)); S.loop.a=Math.max(0,a); S.loop.b=Math.max(S.loop.a,b); drawTimeline(); }
-  else if(drag.kind==='clip'){ let o=drag.orig+(t-drag.t0); if(e.shiftKey) o=snapBeat(o); drag.tr.offset=Math.max(0,o); drawTimeline(); }
+  if(drag.kind==='ruler'){ const a=snapTime(Math.min(drag.t0,t),e.shiftKey), b=snapTime(Math.max(drag.t0,t),e.shiftKey); S.loop.a=Math.max(0,a); S.loop.b=Math.max(S.loop.a,b); drawTimeline(); }
+  else if(drag.kind==='clip'){ drag.tr.offset=snapTime(drag.orig+(t-drag.t0),e.shiftKey); drawTimeline(); }
 });
 cv.addEventListener('pointerup',e=>{
   if(!drag) return; const d=drag; drag=null;
-  if(!d.moved){ seek(d.t0); return; }
+  if(!d.moved){ seek(d.kind==='ruler'?snapTime(d.t0,e.shiftKey):d.t0); return; }
   if(d.kind==='ruler'&&S.loop.b>S.loop.a){ S.loop.on=true; syncButtons(); restart(); markDirty(); }
   if(d.kind==='clip'){ restart(); markDirty(); }
   if(d.kind==='locked') toast(`${d.tr.name} is locked. Press LOCKED on its strip to move it.`);
@@ -850,7 +857,7 @@ function applyProject({meta,decoded}){
   clearProject(); isDemo=false;
   const d=defaults(); S={...d,...meta,click:{...d.click,...meta.click},loop:{...d.loop,...meta.loop}}; for(const k of ['tracks','version','duration','_base']) delete S[k];
   S.name=String(S.name||'Untitled song'); S.bpm=clamp(+S.bpm||120,20,300); S.bpb=clamp(Math.round(+S.bpb)||4,1,32); S.gridOffset=+S.gridOffset||0; S.countIn=clamp(+S.countIn||0,0,16); S.masterDb=+S.masterDb||0; S.pps=clamp(+S.pps||20,4,200);
-  S.loop={on:!!S.loop.on,a:+S.loop.a||0,b:+S.loop.b||0};
+  S.loop={on:!!S.loop.on,a:+S.loop.a||0,b:+S.loop.b||0}; S.tempoLocked=!!S.tempoLocked; if(!['off','bar','beat','1/2','1/4'].includes(S.snap)) S.snap='beat';
   S.click.db=Number.isFinite(+S.click.db)?+S.click.db:-9; S.click.sub=[1,2,3,4].includes(+S.click.sub)?+S.click.sub:1; S.click.trim=clamp(+S.click.trim||0,-150,150); if(!clickBufs[S.click.sound]) S.click.sound='wood';
   for(const {r,bytes,buffer} of decoded) addTrack(buffer,{name:String(r.name||'Track'),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:PALETTE[tracks.length%PALETTE.length],db:Number.isFinite(+r.db)?+r.db:0,pan:clamp(+r.pan||0,-1,1),mute:!!r.mute,solo:!!r.solo,locked:!!r.locked,offset:Math.max(0,+r.offset||0),fileName:String(r.fileName||''),mime:String(r.mime||''),trim:+r.trim||0,keep:+r.keep||0,bytes});
   syncUI(); applyLevels(); dirty=false; syncDirty(); drawTimeline();
@@ -1409,10 +1416,12 @@ function syncButtons(){
   $('play').classList.toggle('on',playing); $('play').setAttribute('aria-label',playing?'Pause':'Play');
   $('loop').classList.toggle('on',S.loop.on); $('click').classList.toggle('on',S.clickOn);
   $('clickMute').classList.toggle('on',S.click.mute);
+  const tl=$('tempoLock'); tl.classList.toggle('on',S.tempoLocked); tl.textContent=S.tempoLocked?'Locked':'Lock'; tl.setAttribute('aria-pressed',S.tempoLocked);
+  $('bpm').disabled=S.tempoLocked; $('tap').disabled=S.tempoLocked;
   drawTimeline();
 }
 function syncUI(){
-  $('projName').value=S.name; $('bpm').value=S.bpm; $('bpb').value=S.bpb; $('countIn').value=S.countIn; $('grid').value=+S.gridOffset.toFixed(3);
+  $('projName').value=S.name; $('bpm').value=S.bpm; $('bpb').value=S.bpb; $('snap').value=S.snap; $('countIn').value=S.countIn; $('grid').value=+S.gridOffset.toFixed(3);
   $('sound').value=S.click.sound; $('sub').value=S.click.sub; $('accent').value=S.click.accent?'1':'0'; $('trim').value=S.click.trim; $('zoom').value=S.pps;
   $('clickFader').value=dbToPos(S.click.db); $('clickDb').textContent=fmtDb(S.click.db); $('masterFader').value=dbToPos(S.masterDb); $('masterDb').textContent=fmtDb(S.masterDb);
   syncButtons();
@@ -1445,10 +1454,13 @@ $('projName').oninput=e=>{ S.name=e.target.value; markDirty(); };
 $('zoom').oninput=e=>{ const tl=$('tl'), mid=(tl.scrollLeft+tl.clientWidth/2)/S.pps; S.pps=+e.target.value; tl.scrollLeft=0; paint(); tl.scrollLeft=mid*S.pps-tl.clientWidth/2; drawTimeline(); };
 let taps=[];
 function tapTempo(){
+  if(S.tempoLocked) return toast('The tempo is locked. Press Locked to change it.');
   const n=performance.now(); if(taps.length&&n-taps[taps.length-1]>2000) taps=[]; taps.push(n); if(taps.length>8) taps.shift();
   if(taps.length>=2){ const v=Math.round(600*(taps.length-1)/((n-taps[0])/100))/10; S.bpm=clamp(v,20,300); $('bpm').value=S.bpm; restart(); drawTimeline(); markDirty(); }
 }
 $('tap').onclick=tapTempo;
+$('tempoLock').onclick=()=>{ S.tempoLocked=!S.tempoLocked; syncButtons(); markDirty(); };
+$('snap').onchange=e=>{ S.snap=e.target.value; markDirty(); };
 addEventListener('keydown',e=>{
   const mod=e.metaKey||e.ctrlKey, key=e.key.toLowerCase();
   if(mod&&key==='s'){ e.preventDefault(); return saveProject(e.shiftKey); }
