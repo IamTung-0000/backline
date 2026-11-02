@@ -341,8 +341,14 @@ const posToDb = p => p <= 0 ? -120 : 40*Math.log10(p/80);
 const fmtDb = db => db <= -119 ? '-inf' : (db > 0 ? '+' : '') + db.toFixed(1);
 
 /* ---------- project state ---------- */
-const defaults = () => ({name:'Untitled song', bpm:120, bpb:4, gridOffset:0, countIn:0, clickOn:true,
-  click:{db:-9, mute:false, sound:'wood', sub:1, accent:true, trim:0},
+/* The click belongs to the player, not the song, so its settings live in this browser and never go in song files. */
+function loadClick(){
+  let c={}; try{ c=JSON.parse(localStorage.getItem('backline.click'))||{}; }catch{}
+  return {on:c.on!==false, db:Number.isFinite(c.db)?c.db:-9, mute:c.mute!==false, sound:['wood','beep','stick'].includes(c.sound)?c.sound:'wood', sub:[1,2,3,4].includes(c.sub)?c.sub:1, accent:c.accent!==false, trim:clamp(+c.trim||0,-150,150)};
+}
+const CLICK=loadClick();
+function saveClick(){ try{ localStorage.setItem('backline.click',JSON.stringify(CLICK)); }catch{} }
+const defaults = () => ({name:'Untitled song', bpm:120, bpb:4, gridOffset:0, countIn:0, click:CLICK,
   masterDb:0, loop:{on:false,a:0,b:0}, pps:20, tempoLocked:false, snap:'beat'});
 let S = defaults(), tracks = [], isDemo = false, dirty = false, fileHandle = null, nextId = 1;
 
@@ -350,7 +356,7 @@ let S = defaults(), tracks = [], isDemo = false, dirty = false, fileHandle = nul
 const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
 const master = ctx.createGain(), masterAn = ctx.createAnalyser(), mainOut = ctx.createGain();
 masterAn.fftSize = 1024; master.connect(masterAn); masterAn.connect(mainOut);
-function clickChain(c){ const gain=c.createGain(), an=c.createAnalyser(); an.fftSize=1024; gain.connect(an); return {ctx:c,gain,an}; }
+function clickChain(c){ const gain=c.createGain(), voice=c.createGain(), an=c.createAnalyser(); an.fftSize=1024; gain.connect(an); voice.connect(an); return {ctx:c,gain,voice,an}; }
 const localClick = clickChain(ctx);
 let remote = null, routeNodes = [], clickRoute = 'mix';
 const activeClick = () => remote || localClick;
@@ -445,7 +451,7 @@ function tick(){
       if(st>=s.to-1e-6){ clickIdx++; continue clickLoop; }
       const ct=s.start+(st-s.from);
       if(ct>now+LOOK) break clickLoop;
-      if((s.silent||S.clickOn) && ct>=now-.03){
+      if((s.silent||S.click.on) && ct>=now-.03){
         const beatPart=((s.k%S.click.sub)+S.click.sub)%S.click.sub===0, beatNo=Math.floor(s.k/S.click.sub), inBar=((beatNo%S.bpb)+S.bpb)%S.bpb;
         fireClick(ct, !beatPart?2:(inBar===0&&S.click.accent?0:1));
       }
@@ -460,7 +466,7 @@ function currentPos(){
   for(const x of segs){ if(x.start<=now) s=x; else break; }
   return Math.min(s.from+Math.max(0,now-s.start), s.to===Infinity?1e12:s.to);
 }
-/* Pressing Play says "Ready" on the click output, waits, then starts. Seeking and edits during playback call play() directly and stay silent. */
+/* Pressing Play says "Ready" on the click output, even with the click muted, waits, then starts. Seeking and edits during playback call play() directly and stay silent. */
 const READY_WAIT=3000, READY_MAX=2500, READY_MP3='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';
 const readyBuf=ctx.decodeAudioData(Uint8Array.from(atob(READY_MP3),c=>c.charCodeAt(0)).buffer).catch(()=>null);
 let cue=null;
@@ -476,7 +482,7 @@ function startWithCue(){
   readyBuf.then(buf=>{
     if(c!==cue) return;
     if(!buf) return wait();
-    const out=activeClick(); c.voice=out.ctx.createBufferSource(); c.voice.buffer=buf; c.voice.connect(out.gain); c.voice.onended=wait;
+    const out=activeClick(); c.voice=out.ctx.createBufferSource(); c.voice.buffer=buf; out.voice.gain.value=gainOf(S.click.db); c.voice.connect(out.voice); c.voice.onended=wait;
     c.voice.start();
   });
 }
@@ -869,7 +875,7 @@ function serialize(){
     const rec={name:t.name,color:t.color,db:t.db,pan:t.pan,mute:t.mute,solo:t.solo,locked:t.locked,offset:t.offset,fileName:t.fileName,mime:t.mime,trim:t.trim||0,keep:t.keep||0,at:off,len:bytes.length};
     parts.push(bytes); off+=bytes.length; return rec;
   });
-  const json=new TextEncoder().encode(JSON.stringify({version:1,...S,duration:duration(),tracks:list})), head=new Uint8Array(4); new DataView(head.buffer).setUint32(0,json.length,true);
+  const json=new TextEncoder().encode(JSON.stringify({version:1,...S,click:undefined,duration:duration(),tracks:list})), head=new Uint8Array(4); new DataView(head.buffer).setUint32(0,json.length,true);
   return new Blob([MAGIC,head,json,...parts],{type:'application/octet-stream'});
 }
 async function saveProject(as){
@@ -896,10 +902,9 @@ async function parseProject(ab){
 }
 function applyProject({meta,decoded}){
   clearProject(); isDemo=false;
-  const d=defaults(); S={...d,...meta,click:{...d.click,...meta.click},loop:{...d.loop,...meta.loop}}; for(const k of ['tracks','version','duration','_base']) delete S[k];
+  const d=defaults(); S={...d,...meta,click:CLICK,loop:{...d.loop,...meta.loop}}; for(const k of ['tracks','version','duration','_base','clickOn']) delete S[k];
   S.name=String(S.name||'Untitled song'); S.bpm=clamp(+S.bpm||120,20,300); S.bpb=clamp(Math.round(+S.bpb)||4,1,32); S.gridOffset=+S.gridOffset||0; S.countIn=clamp(+S.countIn||0,0,16); S.masterDb=+S.masterDb||0; S.pps=clamp(+S.pps||20,4,200);
   S.loop={on:!!S.loop.on,a:+S.loop.a||0,b:+S.loop.b||0}; S.tempoLocked=!!S.tempoLocked; if(!['off','bar','beat','1/2','1/4'].includes(S.snap)) S.snap='beat';
-  S.click.db=Number.isFinite(+S.click.db)?+S.click.db:-9; S.click.sub=[1,2,3,4].includes(+S.click.sub)?+S.click.sub:1; S.click.trim=clamp(+S.click.trim||0,-150,150); if(!clickBufs[S.click.sound]) S.click.sound='wood';
   for(const {r,bytes,buffer} of decoded) addTrack(buffer,{name:String(r.name||'Track'),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:PALETTE[tracks.length%PALETTE.length],db:Number.isFinite(+r.db)?+r.db:0,pan:clamp(+r.pan||0,-1,1),mute:!!r.mute,solo:!!r.solo,locked:!!r.locked,offset:Math.max(0,+r.offset||0),fileName:String(r.fileName||''),mime:String(r.mime||''),trim:+r.trim||0,keep:+r.keep||0,bytes});
   syncUI(); applyLevels(); dirty=false; syncDirty(); drawTimeline();
 }
@@ -1517,7 +1522,7 @@ const rec0=t=>t[0]!==null;
 function syncButtons(){
   $('playIcon').setAttribute('d',playing||cue?'M5 3h4v14H5zm6 0h4v14h-4z':'M5 3l12 7-12 7z');
   $('play').classList.toggle('on',playing||!!cue); $('play').setAttribute('aria-label',cue?'Cancel start':playing?'Pause':'Play');
-  $('loop').classList.toggle('on',S.loop.on); $('click').classList.toggle('on',S.clickOn);
+  $('loop').classList.toggle('on',S.loop.on); $('click').classList.toggle('on',S.click.on);
   $('clickMute').classList.toggle('on',S.click.mute);
   const tl=$('tempoLock'); tl.classList.toggle('on',S.tempoLocked); tl.textContent=S.tempoLocked?'Locked':'Lock'; tl.setAttribute('aria-pressed',S.tempoLocked);
   $('bpm').disabled=S.tempoLocked; $('tap').disabled=S.tempoLocked;
@@ -1536,19 +1541,19 @@ $('loop').onclick=()=>{
   if(!(S.loop.b>S.loop.a)){ return toast('Drag along the ruler above the tracks to mark a loop region.'); }
   S.loop.on=!S.loop.on; syncButtons(); restart(); markDirty();
 };
-$('click').onclick=()=>{ S.clickOn=!S.clickOn; syncButtons(); markDirty(); };
-$('clickMute').onclick=()=>{ S.click.mute=!S.click.mute; applyLevels(); syncButtons(); markDirty(); };
+$('click').onclick=()=>{ S.click.on=!S.click.on; syncButtons(); saveClick(); };
+$('clickMute').onclick=()=>{ S.click.mute=!S.click.mute; applyLevels(); syncButtons(); saveClick(); };
 $('clickTest').onclick=async()=>{ await ctx.resume(); if(remote){await remote.ctx.resume(); remoteDelta=null;} fireClick(ctx.currentTime+.05,0); };
 $('bpm').onchange=e=>{ const v=+e.target.value; if(!(v>=20&&v<=300)){ e.target.value=S.bpm; return toast('Tempo must be between 20 and 300 BPM.'); } S.bpm=v; restart(); drawTimeline(); markDirty(); };
 $('bpb').onchange=e=>{ S.bpb=+e.target.value; restart(); drawTimeline(); markDirty(); };
 $('countIn').onchange=e=>{ S.countIn=+e.target.value; markDirty(); };
 $('grid').onchange=e=>{ S.gridOffset=+e.target.value||0; restart(); drawTimeline(); markDirty(); };
 $('gridHere').onclick=()=>{ S.gridOffset=Math.max(0,currentPos()); $('grid').value=+S.gridOffset.toFixed(3); restart(); drawTimeline(); markDirty(); };
-$('sound').onchange=e=>{ S.click.sound=e.target.value; markDirty(); };
-$('sub').onchange=e=>{ S.click.sub=+e.target.value; restart(); markDirty(); };
-$('accent').onchange=e=>{ S.click.accent=e.target.value==='1'; markDirty(); };
-$('trim').onchange=e=>{ S.click.trim=clamp(+e.target.value||0,-150,150); e.target.value=S.click.trim; markDirty(); };
-$('clickFader').oninput=e=>{ S.click.db=posToDb(+e.target.value); $('clickDb').textContent=fmtDb(S.click.db); applyLevels(); markDirty(); };
+$('sound').onchange=e=>{ S.click.sound=e.target.value; saveClick(); };
+$('sub').onchange=e=>{ S.click.sub=+e.target.value; restart(); saveClick(); };
+$('accent').onchange=e=>{ S.click.accent=e.target.value==='1'; saveClick(); };
+$('trim').onchange=e=>{ S.click.trim=clamp(+e.target.value||0,-150,150); e.target.value=S.click.trim; saveClick(); };
+$('clickFader').oninput=e=>{ S.click.db=posToDb(+e.target.value); $('clickDb').textContent=fmtDb(S.click.db); applyLevels(); saveClick(); };
 $('masterFader').oninput=e=>{ S.masterDb=posToDb(+e.target.value); $('masterDb').textContent=fmtDb(S.masterDb); applyLevels(); markDirty(); };
 $('clickFader').ondblclick=e=>{ e.target.value=80; e.target.oninput(e); };
 $('masterFader').ondblclick=e=>{ e.target.value=80; e.target.oninput(e); };
