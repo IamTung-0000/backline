@@ -1,0 +1,46 @@
+{
+ "version": 2,
+ "updatedAt": 1793609702461,
+ "source": {
+  "type": "gdrive",
+  "fileId": "1WUBHJN2t0d94yCXjvZDGvUEQdfx-ZHif"
+ },
+ "songs": [
+  {
+   "id": "fdcbdaae-555a-4228-acc0-9c23f1d03993",
+   "name": "Dau la Lan Cuoi",
+   "bpm": 130,
+   "duration": 262.153875,
+   "updatedAt": 1793607703986,
+   "size": 31465103
+  },
+  {
+   "id": "2e9a1c26-986a-4ccc-a18f-ea4147eaeab3",
+   "name": "Hoa Ra La - JRC",
+   "bpm": 108,
+   "duration": null,
+   "updatedAt": 1793607735823,
+   "size": 34935704
+  },
+  {
+   "id": "def70ecf-d074-44e7-94a1-6bd62ea43bc7",
+   "name": "Nem Dien Thoai",
+   "bpm": 118,
+   "duration": 179.60591666666667,
+   "updatedAt": 1793607756640,
+   "size": 21507990
+  }
+ ],
+ "shows": [
+  {
+   "id": "a36914e4-9080-49ff-95c4-f45ab66182d9",
+   "name": "SHOW DA LAT",
+   "date": "2026-11-15",
+   "songIds": [
+    "2e9a1c26-986a-4ccc-a18f-ea4147eaeab3",
+    "def70ecf-d074-44e7-94a1-6bd62ea43bc7",
+    "fdcbdaae-555a-4228-acc0-9c23f1d03993"
+   ]
+  }
+ ]
+}
