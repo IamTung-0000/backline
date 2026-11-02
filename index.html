@@ -460,6 +460,29 @@ function currentPos(){
   for(const x of segs){ if(x.start<=now) s=x; else break; }
   return Math.min(s.from+Math.max(0,now-s.start), s.to===Infinity?1e12:s.to);
 }
+/* Pressing Play says "Ready", waits, then starts. Seeking and edits during playback call play() directly and stay silent. */
+const READY_WAIT=3000, READY_MAX=2500;
+let cue=null;
+function startWithCue(){
+  ctx.resume(); if(remote) remote.ctx.resume(); /* browsers only allow this during the key or button press */
+  const c=cue={}; syncButtons();
+  const wait=()=>{
+    if(c!==cue||c.waiting) return;
+    c.waiting=true; clearTimeout(c.timer); toast('Starting in 3 seconds…',READY_WAIT);
+    c.timer=setTimeout(()=>{ if(c===cue){ cue=null; play(); } },READY_WAIT);
+  };
+  c.timer=setTimeout(wait,READY_MAX);
+  if(!window.speechSynthesis) return wait();
+  speechSynthesis.cancel();
+  c.voice=new SpeechSynthesisUtterance('Ready'); c.voice.lang='en-US'; c.voice.onend=c.voice.onerror=wait;
+  speechSynthesis.speak(c.voice);
+}
+function cancelCue(){
+  if(!cue) return;
+  clearTimeout(cue.timer); cue=null;
+  if(window.speechSynthesis) speechSynthesis.cancel();
+  syncButtons(); toast('Start cancelled.',1500);
+}
 async function play(noCount){
   if(playing) return;
   await ctx.resume(); if(remote) await remote.ctx.resume();
@@ -484,7 +507,7 @@ function pause(){
   const p=currentPos(); pos=p<segs[segs.length-1].from&&segs[0].silent?segs[0].to:Math.max(0,p);
   playing=false; halt(); syncButtons();
 }
-function stop(){ const wasLoop=S.loop.on&&S.loop.b>S.loop.a; playing=false; halt(); pos=wasLoop?S.loop.a:0; syncButtons(); revealHead(); }
+function stop(){ cancelCue(); const wasLoop=S.loop.on&&S.loop.b>S.loop.a; playing=false; halt(); pos=wasLoop?S.loop.a:0; syncButtons(); revealHead(); }
 function seek(t){ const was=playing; if(was){playing=false;halt();} pos=Math.max(0,t); if(was) play(true); else updateDisplay(); }
 function restart(){ if(playing){ const p=Math.max(0,currentPos()); playing=false; halt(); pos=p; play(true);} }
 
@@ -500,6 +523,7 @@ function removeTrack(t){
   t.el.remove(); tracks=tracks.filter(x=>x!==t); restart(); applyLevels(); drawTimeline(); markDirty();
 }
 function clearProject(){
+  cancelCue();
   const was=playing; if(was){playing=false;halt();}
   for(const t of tracks){ for(const k in t.nodes) t.nodes[k].disconnect(); t.el.remove(); }
   tracks=[]; pos=0; fileHandle=null; currentSongId=null; syncButtons();
@@ -943,6 +967,7 @@ async function loadSong(id,src){
   if(playing&&!confirm('A song is playing. Stop it and change song?')) return false;
   if(!guardDirty()) return false;
   const token=++loadToken;
+  cancelCue();
   if(playing){ playing=false; halt(); syncButtons(); }
   const rec=findSong(id,src); if(!rec) return false;
   toast(`Loading ${rec.name}…`,0);
@@ -1119,6 +1144,7 @@ async function loadFromLink(raw){
     const blob=await fetchBlob(url,name), ab=await blob.arrayBuffer(), u=new Uint8Array(ab);
     if(MAGIC.every((b,i)=>u[i]===b)){
       if(!guardDirty()) return false;
+      cancelCue();
       if(playing){ playing=false; halt(); }
       applyProject(await parseProject(ab)); renderSetbar(); toast(`Opened ${S.name} from the web.`); return 'project';
     }
@@ -1487,8 +1513,8 @@ const rec0=t=>t[0]!==null;
 
 /* ---------- controls ---------- */
 function syncButtons(){
-  $('playIcon').setAttribute('d',playing?'M5 3h4v14H5zm6 0h4v14h-4z':'M5 3l12 7-12 7z');
-  $('play').classList.toggle('on',playing); $('play').setAttribute('aria-label',playing?'Pause':'Play');
+  $('playIcon').setAttribute('d',playing||cue?'M5 3h4v14H5zm6 0h4v14h-4z':'M5 3l12 7-12 7z');
+  $('play').classList.toggle('on',playing||!!cue); $('play').setAttribute('aria-label',cue?'Cancel start':playing?'Pause':'Play');
   $('loop').classList.toggle('on',S.loop.on); $('click').classList.toggle('on',S.clickOn);
   $('clickMute').classList.toggle('on',S.click.mute);
   const tl=$('tempoLock'); tl.classList.toggle('on',S.tempoLocked); tl.textContent=S.tempoLocked?'Locked':'Lock'; tl.setAttribute('aria-pressed',S.tempoLocked);
@@ -1502,7 +1528,7 @@ function syncUI(){
   syncButtons();
 }
 $('bpb').innerHTML=[2,3,4,5,6,7,8,9,12].map(n=>`<option value="${n}">${n}</option>`).join('');
-$('play').onclick=()=>playing?pause():play();
+$('play').onclick=()=>cue?cancelCue():playing?pause():startWithCue();
 $('stop').onclick=()=>stop();
 $('loop').onclick=()=>{
   if(!(S.loop.b>S.loop.a)){ return toast('Drag along the ruler above the tracks to mark a loop region.'); }
