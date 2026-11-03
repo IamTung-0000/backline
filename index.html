@@ -91,6 +91,7 @@ input.fader::-moz-range-thumb{width:22px;height:34px;background:linear-gradient(
 .db{font:400 11px/1 var(--mono);text-align:center;color:var(--dim);font-variant-numeric:tabular-nums}
 #clickStrip,#cueStrip{--c:var(--click)} #masterStrip{--c:var(--led)}
 #cueStrip.off{opacity:.45}
+#boost.on{background:var(--led);color:#201608;border-color:var(--led)}
 #limit.on{background:var(--led);color:#201608;border-color:var(--led)} #limit.on.act{background:var(--click);border-color:var(--click)}
 .cueTag{flex:1;align-self:center;text-align:center;font:600 10px/1.2 var(--label);color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
 #clip{height:14px;flex:none;border-radius:2px;background:var(--well);border:0;padding:0;cursor:pointer;width:100%}
@@ -242,7 +243,7 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
   <div class="strip" id="masterStrip">
     <div class="title" style="color:var(--led)">Master</div>
     <button id="clip" title="Master clip light. Click to clear." aria-label="Clear clip light"></button>
-    <div class="ms"><button class="wide" id="limit" title="Limiter: keeps the master from going above -1 dB. It lights red while it is working.">LIMIT</button></div>
+    <div class="ms"><button id="limit" title="Limiter: keeps the master from going above -1 dB. It lights red while it is working.">LIMIT</button><button id="boost" title="Output gain for playback: click to step through +0, +3, +6, +9 and +12 dB. Exports are not changed."></button></div>
     <div class="ms"><button class="wide" id="masterExp" title="Export the master mix">EXPORT</button></div>
     <div class="fm"><div class="meter"><i></i><b></b></div><input class="fader" id="masterFader" type="range" min="0" max="100" step="0.5" aria-label="Master level"></div>
     <div class="db" id="masterDb"></div>
@@ -381,7 +382,11 @@ function makeLimiter(c){
 }
 const limiter=makeLimiter(ctx); limiter.output.connect(masterAn);
 let limitOn=true; try{ limitOn=localStorage.getItem('backline.limiter')!=='off'; }catch{}
-function wireLimiter(){ try{master.disconnect()}catch{} master.connect(limitOn?limiter.input:masterAn); }
+/* Output gain makes up for quieter outputs, such as tracks on the left only. It affects playback, not exports, and the limiter still catches the peaks. */
+const BOOSTS=[0,3,6,9,12], boost=ctx.createGain(); master.connect(boost);
+let boostDb=0; try{ const b=+localStorage.getItem('backline.boost'); if(BOOSTS.includes(b)) boostDb=b; }catch{}
+boost.gain.value=gainOf(boostDb);
+function wireLimiter(){ try{boost.disconnect()}catch{} boost.connect(limitOn?limiter.input:masterAn); }
 wireLimiter();
 /* Each click chain also carries the tracks mix (cue) so players hear the song with the click. */
 function clickChain(c){
@@ -1585,7 +1590,7 @@ function syncButtons(){
   $('playIcon').setAttribute('d',playing||cue?'M5 3h4v14H5zm6 0h4v14h-4z':'M5 3l12 7-12 7z');
   $('play').classList.toggle('on',playing||!!cue); $('play').setAttribute('aria-label',cue?'Cancel start':playing?'Pause':'Play');
   $('loop').classList.toggle('on',S.loop.on); $('click').classList.toggle('on',S.click.on);
-  $('limit').classList.toggle('on',limitOn); $('clickMute').classList.toggle('on',S.click.mute); $('cueMute').classList.toggle('on',S.click.tracksMute);
+  $('limit').classList.toggle('on',limitOn); $('boost').textContent=`+${boostDb}`; $('boost').classList.toggle('on',boostDb>0); $('boost').setAttribute('aria-label',`Output gain +${boostDb} dB`); $('clickMute').classList.toggle('on',S.click.mute); $('cueMute').classList.toggle('on',S.click.tracksMute);
   const tl=$('tempoLock'); tl.classList.toggle('on',S.tempoLocked); tl.textContent=S.tempoLocked?'Locked':'Lock'; tl.setAttribute('aria-pressed',S.tempoLocked);
   $('bpm').disabled=S.tempoLocked; $('tap').disabled=S.tempoLocked;
   drawTimeline();
@@ -1621,6 +1626,10 @@ $('clickFader').ondblclick=e=>{ e.target.value=80; e.target.oninput(e); };
 $('cueFader').oninput=e=>{ S.click.tracksDb=posToDb(+e.target.value); $('cueDb').textContent=fmtDb(S.click.tracksDb); applyLevels(); saveClick(); };
 $('cueFader').ondblclick=e=>{ e.target.value=80; e.target.oninput(e); };
 $('cueMute').onclick=()=>{ S.click.tracksMute=!S.click.tracksMute; applyLevels(); syncButtons(); saveClick(); };
+$('boost').onclick=()=>{
+  boostDb=BOOSTS[(BOOSTS.indexOf(boostDb)+1)%BOOSTS.length]; boost.gain.setTargetAtTime(gainOf(boostDb),ctx.currentTime,.008); syncButtons();
+  try{ localStorage.setItem('backline.boost',boostDb); }catch{}
+};
 $('limit').onclick=()=>{ limitOn=!limitOn; wireLimiter(); syncButtons(); try{ localStorage.setItem('backline.limiter',limitOn?'on':'off'); }catch{} };
 $('masterFader').ondblclick=e=>{ e.target.value=80; e.target.oninput(e); };
 $('clip').onclick=()=>$('clip').classList.remove('on');
