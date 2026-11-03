@@ -91,7 +91,8 @@ input.fader::-moz-range-thumb{width:22px;height:34px;background:linear-gradient(
 .db{font:400 11px/1 var(--mono);text-align:center;color:var(--dim);font-variant-numeric:tabular-nums}
 #clickStrip,#cueStrip{--c:var(--click)} #masterStrip{--c:var(--led)}
 #cueStrip.off{opacity:.45}
-#boost.on{background:var(--led);color:#201608;border-color:var(--led)}
+#clickExp{flex:1.6!important}
+#boost.on,.gainBtn.on{background:var(--led);color:#201608;border-color:var(--led)}
 #limit.on{background:var(--led);color:#201608;border-color:var(--led)} #limit.on.act{background:var(--click);border-color:var(--click)}
 .cueTag{flex:1;align-self:center;text-align:center;font:600 10px/1.2 var(--label);color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
 #clip{height:14px;flex:none;border-radius:2px;background:var(--well);border:0;padding:0;cursor:pointer;width:100%}
@@ -228,14 +229,14 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
     <div class="title" style="color:var(--click)">Click</div>
     <input class="pan" style="visibility:hidden" type="range" tabindex="-1" aria-hidden="true">
     <div class="ms"><button class="m" id="clickMute" aria-label="Mute click">M</button><button id="clickTest" title="Play one click on the selected output">TEST</button></div>
-    <div class="ms"><button class="wide" id="clickExp" title="Export the click on its own">EXPORT</button></div>
+    <div class="ms"><button id="clickExp" title="Export the click on its own">EXPORT</button><button class="gainBtn" id="clickBoost" data-key="boost" title="Click output gain for playback: click to step through +0, +3, +6, +9 and +12 dB. Exports are not changed."></button></div>
     <div class="fm"><div class="meter"><i></i><b></b></div><input class="fader" id="clickFader" type="range" min="0" max="100" step="0.5" aria-label="Click level"></div>
     <div class="db" id="clickDb"></div>
   </div>
   <div class="strip" id="cueStrip">
     <div class="title" style="color:var(--click)">Tracks</div>
     <input class="pan" style="visibility:hidden" type="range" tabindex="-1" aria-hidden="true">
-    <div class="ms"><button class="m" id="cueMute" aria-label="Mute tracks on the click output">M</button><button style="visibility:hidden" tabindex="-1">-</button></div>
+    <div class="ms"><button class="m" id="cueMute" aria-label="Mute tracks on the click output">M</button><button class="gainBtn" id="cueBoost" data-key="tracksBoost" title="Gain for the tracks on the click output: click to step through +0, +3, +6, +9 and +12 dB."></button></div>
     <div class="ms"><span class="cueTag">To click out</span></div>
     <div class="fm"><div class="meter"><i></i><b></b></div><input class="fader" id="cueFader" type="range" min="0" max="100" step="0.5" title="Tracks level on the click output. Double-click for 0 dB." aria-label="Tracks level on the click output"></div>
     <div class="db" id="cueDb"></div>
@@ -356,7 +357,7 @@ const fmtDb = db => db <= -119 ? '-inf' : (db > 0 ? '+' : '') + db.toFixed(1);
 /* The click belongs to the player, not the song, so its settings live in this browser and never go in song files. */
 function loadClick(){
   let c={}; try{ c=JSON.parse(localStorage.getItem('backline.click'))||{}; }catch{}
-  return {on:c.on!==false, db:Number.isFinite(c.db)?c.db:-9, mute:c.mute!==false, sound:['wood','beep','stick'].includes(c.sound)?c.sound:'wood', sub:[1,2,3,4].includes(c.sub)?c.sub:1, accent:c.accent!==false, trim:clamp(+c.trim||0,-150,150), tracksDb:Number.isFinite(c.tracksDb)?c.tracksDb:0, tracksMute:!!c.tracksMute, countIn:[0,1,2,4].includes(c.countIn)?c.countIn:1};
+  return {on:c.on!==false, db:Number.isFinite(c.db)?c.db:-9, mute:c.mute!==false, sound:['wood','beep','stick'].includes(c.sound)?c.sound:'wood', sub:[1,2,3,4].includes(c.sub)?c.sub:1, accent:c.accent!==false, trim:clamp(+c.trim||0,-150,150), tracksDb:Number.isFinite(c.tracksDb)?c.tracksDb:0, tracksMute:!!c.tracksMute, countIn:[0,1,2,4].includes(c.countIn)?c.countIn:1, boost:[0,3,6,9,12].includes(c.boost)?c.boost:0, tracksBoost:[0,3,6,9,12].includes(c.tracksBoost)?c.tracksBoost:0};
 }
 const CLICK=loadClick();
 function saveClick(){ try{ localStorage.setItem('backline.click',JSON.stringify(CLICK)); }catch{} }
@@ -448,13 +449,13 @@ function applyLevels(){
     t.nodes.pan.pan.setTargetAtTime(t.pan,now,.008);
   }
   master.gain.setTargetAtTime(gainOf(S.masterDb),now,.008);
-  const cg=S.click.tracksMute?0:gainOf(S.click.tracksDb);
+  const cg=S.click.tracksMute?0:gainOf(S.click.tracksDb+S.click.tracksBoost);
   localClick.cue.gain.setTargetAtTime(cg,now,.008);
   if(remote){
     const rn=remote.ctx.currentTime; remote.cue.gain.setTargetAtTime(cg,rn,.008);
     for(const t of tracks){ const m=mirror(t); m.gain.gain.setTargetAtTime(gainOf(t.db),rn,.008); m.mute.gain.setTargetAtTime((t.mute||(any&&!t.solo))?0:1,rn,.008); m.pan.pan.setTargetAtTime(t.pan,rn,.008); }
   }
-  const g=S.click.mute?0:gainOf(S.click.db);
+  const g=S.click.mute?0:gainOf(S.click.db+S.click.boost);
   localClick.gain.gain.setTargetAtTime(g,now,.008);
   if(remote) remote.gain.gain.setTargetAtTime(g,remote.ctx.currentTime,.008);
 }
@@ -1590,7 +1591,8 @@ function syncButtons(){
   $('playIcon').setAttribute('d',playing||cue?'M5 3h4v14H5zm6 0h4v14h-4z':'M5 3l12 7-12 7z');
   $('play').classList.toggle('on',playing||!!cue); $('play').setAttribute('aria-label',cue?'Cancel start':playing?'Pause':'Play');
   $('loop').classList.toggle('on',S.loop.on); $('click').classList.toggle('on',S.click.on);
-  $('limit').classList.toggle('on',limitOn); $('boost').textContent=`+${boostDb}`; $('boost').classList.toggle('on',boostDb>0); $('boost').setAttribute('aria-label',`Output gain +${boostDb} dB`); $('clickMute').classList.toggle('on',S.click.mute); $('cueMute').classList.toggle('on',S.click.tracksMute);
+  $('limit').classList.toggle('on',limitOn); $('boost').textContent=`+${boostDb}`; $('boost').classList.toggle('on',boostDb>0); $('boost').setAttribute('aria-label',`Output gain +${boostDb} dB`);
+  for(const b of document.querySelectorAll('.gainBtn')){ const v=S.click[b.dataset.key]; b.textContent=`+${v}`; b.classList.toggle('on',v>0); b.setAttribute('aria-label',`Gain +${v} dB`); } $('clickMute').classList.toggle('on',S.click.mute); $('cueMute').classList.toggle('on',S.click.tracksMute);
   const tl=$('tempoLock'); tl.classList.toggle('on',S.tempoLocked); tl.textContent=S.tempoLocked?'Locked':'Lock'; tl.setAttribute('aria-pressed',S.tempoLocked);
   $('bpm').disabled=S.tempoLocked; $('tap').disabled=S.tempoLocked;
   drawTimeline();
@@ -1630,6 +1632,7 @@ $('boost').onclick=()=>{
   boostDb=BOOSTS[(BOOSTS.indexOf(boostDb)+1)%BOOSTS.length]; boost.gain.setTargetAtTime(gainOf(boostDb),ctx.currentTime,.008); syncButtons();
   try{ localStorage.setItem('backline.boost',boostDb); }catch{}
 };
+for(const b of document.querySelectorAll('.gainBtn')) b.onclick=()=>{ const k=b.dataset.key; S.click[k]=BOOSTS[(BOOSTS.indexOf(S.click[k])+1)%BOOSTS.length]; applyLevels(); syncButtons(); saveClick(); };
 $('limit').onclick=()=>{ limitOn=!limitOn; wireLimiter(); syncButtons(); try{ localStorage.setItem('backline.limiter',limitOn?'on':'off'); }catch{} };
 $('masterFader').ondblclick=e=>{ e.target.value=80; e.target.oninput(e); };
 $('clip').onclick=()=>$('clip').classList.remove('on');
