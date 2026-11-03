@@ -2,6 +2,8 @@
 
 A backing track player that runs in the browser: mixer, MP3/WAV import and export, stems, a click track with its own output, project files, and a library of songs and show set lists.
 
+The master has a limiter (LIMIT, on by default) that keeps it below -1 dB, in playback and in master exports.
+
 Click settings belong to the browser, not to each song, and the click starts muted. The Tracks strip next to Click sends the track mix to the click output too, so players hear the song with the click. It needs a click output other than "Mixed with tracks".
 
 Pressing Play says "Ready" on the click output, waits 3 seconds, then starts. Press Play or Stop during the wait to cancel. The voice follows the click's on/off button, mute and fader, so it is silent while the click is muted. It was made with the macOS Samantha voice.
