@@ -89,7 +89,9 @@ input.fader::-moz-range-track{width:4px;background:var(--well);border-radius:2px
 input.fader::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:36px;margin-left:-10px;background:linear-gradient(var(--cap) 0 46%,#26262b 46% 54%,var(--cap) 54%);border-radius:3px;border:1px solid #000}
 input.fader::-moz-range-thumb{width:22px;height:34px;background:linear-gradient(var(--cap) 0 46%,#26262b 46% 54%,var(--cap) 54%);border-radius:3px;border:1px solid #000}
 .db{font:400 11px/1 var(--mono);text-align:center;color:var(--dim);font-variant-numeric:tabular-nums}
-#clickStrip{--c:var(--click)} #masterStrip{--c:var(--led)}
+#clickStrip,#cueStrip{--c:var(--click)} #masterStrip{--c:var(--led)}
+#cueStrip.off{opacity:.45}
+.cueTag{flex:1;align-self:center;text-align:center;font:600 10px/1.2 var(--label);color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
 #clip{height:14px;flex:none;border-radius:2px;background:var(--well);border:0;padding:0;cursor:pointer;width:100%}
 #clip.on{background:var(--click)}
 #addStrip{flex:none;width:88px;border:1px dashed var(--line);border-radius:5px;background:transparent;color:var(--dim);cursor:pointer;font:600 13px/1.2 var(--label)}
@@ -228,6 +230,14 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
     <div class="fm"><div class="meter"><i></i><b></b></div><input class="fader" id="clickFader" type="range" min="0" max="100" step="0.5" aria-label="Click level"></div>
     <div class="db" id="clickDb"></div>
   </div>
+  <div class="strip" id="cueStrip">
+    <div class="title" style="color:var(--click)">Tracks</div>
+    <input class="pan" style="visibility:hidden" type="range" tabindex="-1" aria-hidden="true">
+    <div class="ms"><button class="m" id="cueMute" aria-label="Mute tracks on the click output">M</button><button style="visibility:hidden" tabindex="-1">-</button></div>
+    <div class="ms"><span class="cueTag">To click out</span></div>
+    <div class="fm"><div class="meter"><i></i><b></b></div><input class="fader" id="cueFader" type="range" min="0" max="100" step="0.5" title="Tracks level on the click output. Double-click for 0 dB." aria-label="Tracks level on the click output"></div>
+    <div class="db" id="cueDb"></div>
+  </div>
   <div class="strip" id="masterStrip">
     <div class="title" style="color:var(--led)">Master</div>
     <button id="clip" title="Master clip light. Click to clear." aria-label="Clear clip light"></button>
@@ -344,7 +354,7 @@ const fmtDb = db => db <= -119 ? '-inf' : (db > 0 ? '+' : '') + db.toFixed(1);
 /* The click belongs to the player, not the song, so its settings live in this browser and never go in song files. */
 function loadClick(){
   let c={}; try{ c=JSON.parse(localStorage.getItem('backline.click'))||{}; }catch{}
-  return {on:c.on!==false, db:Number.isFinite(c.db)?c.db:-9, mute:c.mute!==false, sound:['wood','beep','stick'].includes(c.sound)?c.sound:'wood', sub:[1,2,3,4].includes(c.sub)?c.sub:1, accent:c.accent!==false, trim:clamp(+c.trim||0,-150,150)};
+  return {on:c.on!==false, db:Number.isFinite(c.db)?c.db:-9, mute:c.mute!==false, sound:['wood','beep','stick'].includes(c.sound)?c.sound:'wood', sub:[1,2,3,4].includes(c.sub)?c.sub:1, accent:c.accent!==false, trim:clamp(+c.trim||0,-150,150), tracksDb:Number.isFinite(c.tracksDb)?c.tracksDb:0, tracksMute:!!c.tracksMute};
 }
 const CLICK=loadClick();
 function saveClick(){ try{ localStorage.setItem('backline.click',JSON.stringify(CLICK)); }catch{} }
@@ -356,7 +366,12 @@ let S = defaults(), tracks = [], isDemo = false, dirty = false, fileHandle = nul
 const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
 const master = ctx.createGain(), masterAn = ctx.createAnalyser(), mainOut = ctx.createGain();
 masterAn.fftSize = 1024; master.connect(masterAn); masterAn.connect(mainOut);
-function clickChain(c){ const gain=c.createGain(), an=c.createAnalyser(); an.fftSize=1024; gain.connect(an); return {ctx:c,gain,an}; }
+/* Each click chain also carries the tracks mix (cue) so players hear the song with the click. */
+function clickChain(c){
+  const gain=c.createGain(), an=c.createAnalyser(), out=c.createGain(), cue=c.createGain(), cueAn=c.createAnalyser();
+  an.fftSize=cueAn.fftSize=1024; gain.connect(an); an.connect(out); cue.connect(cueAn);
+  return {ctx:c,gain,an,out,cue,cueAn};
+}
 const localClick = clickChain(ctx);
 let remote = null, routeNodes = [], clickRoute = 'mix';
 const activeClick = () => remote || localClick;
@@ -381,23 +396,27 @@ for(const s of ['wood','beep','stick']) clickBufs[s]=[0,1,2].map(l=>makeClickSou
 
 function wireOutputs(){
   routeNodes.forEach(n=>{try{n.disconnect()}catch{}}); routeNodes=[];
-  try{mainOut.disconnect()}catch{}; try{localClick.an.disconnect()}catch{}
+  try{mainOut.disconnect()}catch{}; try{localClick.out.disconnect()}catch{}; try{localClick.cueAn.disconnect()}catch{}
   const d=ctx.destination, max=Math.min(d.maxChannelCount||2,32);
   if(clickRoute==='split'){
     d.channelCount=2; d.channelInterpretation='speakers';
-    const m=ctx.createChannelMerger(2); mainOut.connect(m,0,0); localClick.an.connect(m,0,1); m.connect(d); routeNodes=[m];
+    const m=ctx.createChannelMerger(2); mainOut.connect(m,0,0); localClick.out.connect(m,0,1); m.connect(d); routeNodes=[m];
   } else if(clickRoute.startsWith('ch:')){
     const ch=+clickRoute.slice(3);
     d.channelCount=max; d.channelCountMode='explicit'; d.channelInterpretation='discrete';
     const m=ctx.createChannelMerger(max), sp=ctx.createChannelSplitter(2);
     mainOut.channelCount=2; mainOut.channelCountMode='explicit'; mainOut.connect(sp); sp.connect(m,0,0); sp.connect(m,1,1);
-    localClick.an.connect(m,0,ch); if(ch+1<max) localClick.an.connect(m,0,ch+1);
+    localClick.out.connect(m,0,ch); if(ch+1<max) localClick.out.connect(m,0,ch+1);
     m.connect(d); routeNodes=[m,sp];
   } else {
     d.channelCount=2; d.channelInterpretation='speakers';
     mainOut.connect(d);
-    if(!remote) localClick.an.connect(d);
+    if(!remote) localClick.out.connect(d);
   }
+  /* With the click mixed into the tracks output there is nowhere separate to send the tracks. */
+  if(clickRoute==='split'||clickRoute.startsWith('ch:')) localClick.cueAn.connect(localClick.out);
+  $('cueStrip').classList.toggle('off',clickRoute==='mix');
+  $('cueStrip').title=clickRoute==='mix'?'Choose a separate click output to send the tracks there':'Tracks mix on the click output';
 }
 function applyLevels(){
   const any=tracks.some(t=>t.solo), now=ctx.currentTime;
@@ -407,6 +426,12 @@ function applyLevels(){
     t.nodes.pan.pan.setTargetAtTime(t.pan,now,.008);
   }
   master.gain.setTargetAtTime(gainOf(S.masterDb),now,.008);
+  const cg=S.click.tracksMute?0:gainOf(S.click.tracksDb);
+  localClick.cue.gain.setTargetAtTime(cg,now,.008);
+  if(remote){
+    const rn=remote.ctx.currentTime; remote.cue.gain.setTargetAtTime(cg,rn,.008);
+    for(const t of tracks){ const m=mirror(t); m.gain.gain.setTargetAtTime(gainOf(t.db),rn,.008); m.mute.gain.setTargetAtTime((t.mute||(any&&!t.solo))?0:1,rn,.008); m.pan.pan.setTargetAtTime(t.pan,rn,.008); }
+  }
   const g=S.click.mute?0:gainOf(S.click.db);
   localClick.gain.gain.setTargetAtTime(g,now,.008);
   if(remote) remote.gain.gain.setTargetAtTime(g,remote.ctx.currentTime,.008);
@@ -426,16 +451,30 @@ function pushSeg(start,from,to,silent){
     if(b<=a) continue;
     const src=ctx.createBufferSource(); src.buffer=t.buffer; src.connect(t.nodes.gain);
     src.start(start+(a-from),a-t.offset,b-a); src.onended=()=>liveSrc.delete(src); liveSrc.add(src);
+    if(remote){
+      const rc=remote.ctx, rs=rc.createBufferSource(); let at=remoteTime(start+(a-from)), off=a-t.offset, len=b-a;
+      const late=rc.currentTime-at; if(late>0){ at+=late; off+=late; len-=late; }
+      if(len>0){ rs.buffer=t.buffer; rs.connect(mirror(t).gain); rs.start(at,off,len); rs.onended=()=>liveSrc.delete(rs); liveSrc.add(rs); }
+    }
   }
 }
+/* A separate click device runs on its own clock, so its copy of each track is scheduled the way clicks are. */
+function remoteTime(t){
+  const lat=x=>x.outputLatency||x.baseLatency||0;
+  return t+(remoteDelta??(remote.ctx.currentTime-ctx.currentTime))+lat(ctx)-lat(remote.ctx);
+}
+function mirror(t){
+  if(t.mirror?.ctx===remote.ctx) return t.mirror;
+  const c=remote.ctx, m={ctx:c,gain:c.createGain(),mute:c.createGain(),pan:c.createStereoPanner()};
+  m.gain.connect(m.mute); m.mute.connect(m.pan); m.pan.connect(remote.cue);
+  return t.mirror=m;
+}
+function dropMirror(t){ if(t.mirror){ for(const k of ['gain','mute','pan']) try{t.mirror[k].disconnect()}catch{} t.mirror=null; } }
 function segEnd(s){ return s.start+(s.to-s.from); }
 function fireClick(when,level){
   const c=activeClick(), src=c.ctx.createBufferSource(); src.buffer=clickBufs[S.click.sound][level]; src.connect(c.gain);
   let t=when+S.click.trim/1000;
-  if(remote){
-    const lat=x=>x.outputLatency||x.baseLatency||0;
-    t+= (remoteDelta??(remote.ctx.currentTime-ctx.currentTime)) + lat(ctx)-lat(remote.ctx);
-  }
+  if(remote) t=remoteTime(t);
   src.start(Math.max(c.ctx.currentTime,t)); src.onended=()=>liveClicks.delete(src); liveClicks.add(src);
 }
 function tick(){
@@ -523,17 +562,17 @@ function restart(){ if(playing){ const p=Math.max(0,currentPos()); playing=false
 function addTrack(buffer,opts={}){
   const t=Object.assign({id:nextId++,name:'Track',color:PALETTE[tracks.length%PALETTE.length],db:0,pan:0,mute:false,solo:false,locked:false,offset:0,bytes:null,fileName:'',mime:''},opts,{buffer});
   const n=t.nodes={gain:ctx.createGain(),mute:ctx.createGain(),pan:ctx.createStereoPanner(),an:ctx.createAnalyser()};
-  n.an.fftSize=1024; n.gain.connect(n.mute); n.mute.connect(n.pan); n.pan.connect(n.an); n.an.connect(master);
+  n.an.fftSize=1024; n.gain.connect(n.mute); n.mute.connect(n.pan); n.pan.connect(n.an); n.an.connect(master); n.an.connect(localClick.cue);
   t.peaks=computePeaks(buffer); tracks.push(t); buildStrip(t); applyLevels(); return t;
 }
 function removeTrack(t){
-  for(const k in t.nodes) t.nodes[k].disconnect();
+  for(const k in t.nodes) t.nodes[k].disconnect(); dropMirror(t);
   t.el.remove(); tracks=tracks.filter(x=>x!==t); restart(); applyLevels(); drawTimeline(); markDirty();
 }
 function clearProject(){
   cancelCue();
   const was=playing; if(was){playing=false;halt();}
-  for(const t of tracks){ for(const k in t.nodes) t.nodes[k].disconnect(); t.el.remove(); }
+  for(const t of tracks){ for(const k in t.nodes) t.nodes[k].disconnect(); dropMirror(t); t.el.remove(); }
   tracks=[]; pos=0; fileHandle=null; currentSongId=null; syncButtons();
 }
 function computePeaks(buf){
@@ -602,12 +641,15 @@ function readMeter(an,m,dt){
 }
 const masterMeter={bar:document.querySelector('#masterStrip .meter i'),hold:document.querySelector('#masterStrip .meter b'),peak:0,hd:0,ht:0};
 const clickMeter={bar:document.querySelector('#clickStrip .meter i'),hold:document.querySelector('#clickStrip .meter b'),peak:0,hd:0,ht:0};
+const cueMeter={bar:document.querySelector('#cueStrip .meter i'),hold:document.querySelector('#cueStrip .meter b'),peak:0,hd:0,ht:0};
 let lastFrame=performance.now();
 function frame(now){
   const dt=Math.min(.1,(now-lastFrame)/1000); lastFrame=now;
   for(const t of tracks) readMeter(t.nodes.an,t.meter,dt);
   if(readMeter(masterAn,masterMeter,dt)>=1) $('clip').classList.add('on');
   readMeter(activeClick().an,clickMeter,dt);
+  if(clickRoute!=='mix') readMeter(activeClick().cueAn,cueMeter,dt);
+  else if(cueMeter.hd||cueMeter.peak){ cueMeter.peak=cueMeter.hd=0; cueMeter.bar.style.transform='scaleY(0)'; cueMeter.hold.style.bottom='0%'; }
   updateDisplay();
   requestAnimationFrame(frame);
 }
@@ -733,7 +775,7 @@ function routeNote(msg,warn){
   n.classList.toggle('warn',!!warn);
   if(msg){ n.textContent=msg; return; }
   if(clickRoute==='mix') n.textContent=!canSink?'Separate devices need Chrome or Edge. Left/right split works here.':(max<4?`This output has ${max} channels. Pick a 4-channel interface under Tracks output to get outs 3-4.`:`This output has ${max} channels. Outs 3 and up are available for the click.`);
-  else if(clickRoute==='split') n.textContent='Tracks are summed to mono on the left and the click plays on the right.';
+  else if(clickRoute==='split') n.textContent='Tracks are summed to mono on the left. The right has the click plus the tracks at the Tracks fader level.';
   else if(clickRoute.startsWith('ch:')) n.textContent='Tracks play on outs 1-2. The click stays sample-locked to them.';
   else n.textContent='Clicks run on a separate audio clock. If they sound early or late, adjust Click nudge.';
 }
@@ -743,10 +785,11 @@ async function setClickRoute(v,silent){
   if(v.startsWith('dev:')){
     try{
       const rc=new AudioContext({latencyHint:'interactive'}); await rc.setSinkId(v.slice(4));
-      const ch=clickChain(rc); ch.an.connect(rc.destination); remote=ch; rc.resume();
+      const ch=clickChain(rc); ch.out.connect(rc.destination); ch.cueAn.connect(ch.out); remote=ch; rc.resume();
     }catch(e){ clickRoute='mix'; if(!silent) routeNote(`That device can't be opened (${e.name}). Click is back on the main output.`,true); }
   }
-  wireOutputs(); applyLevels();
+  for(const t of tracks) t.mirror=null;
+  wireOutputs(); applyLevels(); restart();
   $('clickOut').value=clickRoute;
   try{localStorage.setItem('backline.clickOut',clickRoute)}catch{}
   if(clickRoute===v) routeNote();
@@ -1523,7 +1566,7 @@ function syncButtons(){
   $('playIcon').setAttribute('d',playing||cue?'M5 3h4v14H5zm6 0h4v14h-4z':'M5 3l12 7-12 7z');
   $('play').classList.toggle('on',playing||!!cue); $('play').setAttribute('aria-label',cue?'Cancel start':playing?'Pause':'Play');
   $('loop').classList.toggle('on',S.loop.on); $('click').classList.toggle('on',S.click.on);
-  $('clickMute').classList.toggle('on',S.click.mute);
+  $('clickMute').classList.toggle('on',S.click.mute); $('cueMute').classList.toggle('on',S.click.tracksMute);
   const tl=$('tempoLock'); tl.classList.toggle('on',S.tempoLocked); tl.textContent=S.tempoLocked?'Locked':'Lock'; tl.setAttribute('aria-pressed',S.tempoLocked);
   $('bpm').disabled=S.tempoLocked; $('tap').disabled=S.tempoLocked;
   drawTimeline();
@@ -1531,7 +1574,7 @@ function syncButtons(){
 function syncUI(){
   $('projName').value=S.name; $('bpm').value=S.bpm; $('bpb').value=S.bpb; $('snap').value=S.snap; $('countIn').value=S.countIn; $('grid').value=+S.gridOffset.toFixed(3);
   $('sound').value=S.click.sound; $('sub').value=S.click.sub; $('accent').value=S.click.accent?'1':'0'; $('trim').value=S.click.trim; $('zoom').value=S.pps;
-  $('clickFader').value=dbToPos(S.click.db); $('clickDb').textContent=fmtDb(S.click.db); $('masterFader').value=dbToPos(S.masterDb); $('masterDb').textContent=fmtDb(S.masterDb);
+  $('clickFader').value=dbToPos(S.click.db); $('clickDb').textContent=fmtDb(S.click.db); $('cueFader').value=dbToPos(S.click.tracksDb); $('cueDb').textContent=fmtDb(S.click.tracksDb); $('masterFader').value=dbToPos(S.masterDb); $('masterDb').textContent=fmtDb(S.masterDb);
   syncButtons();
 }
 $('bpb').innerHTML=[2,3,4,5,6,7,8,9,12].map(n=>`<option value="${n}">${n}</option>`).join('');
@@ -1556,6 +1599,9 @@ $('trim').onchange=e=>{ S.click.trim=clamp(+e.target.value||0,-150,150); e.targe
 $('clickFader').oninput=e=>{ S.click.db=posToDb(+e.target.value); $('clickDb').textContent=fmtDb(S.click.db); applyLevels(); saveClick(); };
 $('masterFader').oninput=e=>{ S.masterDb=posToDb(+e.target.value); $('masterDb').textContent=fmtDb(S.masterDb); applyLevels(); markDirty(); };
 $('clickFader').ondblclick=e=>{ e.target.value=80; e.target.oninput(e); };
+$('cueFader').oninput=e=>{ S.click.tracksDb=posToDb(+e.target.value); $('cueDb').textContent=fmtDb(S.click.tracksDb); applyLevels(); saveClick(); };
+$('cueFader').ondblclick=e=>{ e.target.value=80; e.target.oninput(e); };
+$('cueMute').onclick=()=>{ S.click.tracksMute=!S.click.tracksMute; applyLevels(); syncButtons(); saveClick(); };
 $('masterFader').ondblclick=e=>{ e.target.value=80; e.target.oninput(e); };
 $('clip').onclick=()=>$('clip').classList.remove('on');
 $('projName').oninput=e=>{ S.name=e.target.value; markDirty(); };
