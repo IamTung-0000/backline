@@ -355,11 +355,11 @@ const fmtDb = db => db <= -119 ? '-inf' : (db > 0 ? '+' : '') + db.toFixed(1);
 /* The click belongs to the player, not the song, so its settings live in this browser and never go in song files. */
 function loadClick(){
   let c={}; try{ c=JSON.parse(localStorage.getItem('backline.click'))||{}; }catch{}
-  return {on:c.on!==false, db:Number.isFinite(c.db)?c.db:-9, mute:c.mute!==false, sound:['wood','beep','stick'].includes(c.sound)?c.sound:'wood', sub:[1,2,3,4].includes(c.sub)?c.sub:1, accent:c.accent!==false, trim:clamp(+c.trim||0,-150,150), tracksDb:Number.isFinite(c.tracksDb)?c.tracksDb:0, tracksMute:!!c.tracksMute};
+  return {on:c.on!==false, db:Number.isFinite(c.db)?c.db:-9, mute:c.mute!==false, sound:['wood','beep','stick'].includes(c.sound)?c.sound:'wood', sub:[1,2,3,4].includes(c.sub)?c.sub:1, accent:c.accent!==false, trim:clamp(+c.trim||0,-150,150), tracksDb:Number.isFinite(c.tracksDb)?c.tracksDb:0, tracksMute:!!c.tracksMute, countIn:[0,1,2,4].includes(c.countIn)?c.countIn:1};
 }
 const CLICK=loadClick();
 function saveClick(){ try{ localStorage.setItem('backline.click',JSON.stringify(CLICK)); }catch{} }
-const defaults = () => ({name:'Untitled song', bpm:120, bpb:4, gridOffset:0, countIn:0, click:CLICK,
+const defaults = () => ({name:'Untitled song', bpm:120, bpb:4, gridOffset:0, click:CLICK,
   masterDb:0, loop:{on:false,a:0,b:0}, pps:20, tempoLocked:false, snap:'beat'});
 let S = defaults(), tracks = [], isDemo = false, dirty = false, fileHandle = null, nextId = 1;
 
@@ -557,7 +557,7 @@ async function play(noCount){
   if(!looped&&dur>0&&from>=dur) from=0;
   segs=[]; clickIdx=0; let t0=ctx.currentTime+.12;
   playing=true; pos=from;
-  if(S.countIn>0&&!noCount){ const pre=S.countIn*S.bpb*beatSec(); pushSeg(t0,from-pre,from,true); t0+=pre; }
+  if(S.click.countIn>0&&!noCount){ const pre=S.click.countIn*S.bpb*beatSec(); pushSeg(t0,from-pre,from,true); t0+=pre; }
   pushSeg(t0,from,looped?L.b:(dur>0?dur:Infinity),false);
   timerWorker.postMessage(1); tick(); syncButtons();
 }
@@ -964,8 +964,8 @@ async function parseProject(ab){
 }
 function applyProject({meta,decoded}){
   clearProject(); isDemo=false;
-  const d=defaults(); S={...d,...meta,click:CLICK,loop:{...d.loop,...meta.loop}}; for(const k of ['tracks','version','duration','_base','clickOn']) delete S[k];
-  S.name=String(S.name||'Untitled song'); S.bpm=clamp(+S.bpm||120,20,300); S.bpb=clamp(Math.round(+S.bpb)||4,1,32); S.gridOffset=+S.gridOffset||0; S.countIn=clamp(+S.countIn||0,0,16); S.masterDb=+S.masterDb||0; S.pps=clamp(+S.pps||20,4,200);
+  const d=defaults(); S={...d,...meta,click:CLICK,loop:{...d.loop,...meta.loop}}; for(const k of ['tracks','version','duration','_base','clickOn','countIn']) delete S[k];
+  S.name=String(S.name||'Untitled song'); S.bpm=clamp(+S.bpm||120,20,300); S.bpb=clamp(Math.round(+S.bpb)||4,1,32); S.gridOffset=+S.gridOffset||0; S.masterDb=+S.masterDb||0; S.pps=clamp(+S.pps||20,4,200);
   S.loop={on:!!S.loop.on,a:+S.loop.a||0,b:+S.loop.b||0}; S.tempoLocked=!!S.tempoLocked; if(!['off','bar','beat','1/2','1/4'].includes(S.snap)) S.snap='beat';
   for(const {r,bytes,buffer} of decoded) addTrack(buffer,{name:String(r.name||'Track'),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:PALETTE[tracks.length%PALETTE.length],db:Number.isFinite(+r.db)?+r.db:0,pan:clamp(+r.pan||0,-1,1),mute:!!r.mute,solo:!!r.solo,locked:!!r.locked,offset:Math.max(0,+r.offset||0),fileName:String(r.fileName||''),mime:String(r.mime||''),trim:+r.trim||0,keep:+r.keep||0,bytes});
   syncUI(); applyLevels(); dirty=false; syncDirty(); drawTimeline();
@@ -1591,7 +1591,7 @@ function syncButtons(){
   drawTimeline();
 }
 function syncUI(){
-  $('projName').value=S.name; $('bpm').value=S.bpm; $('bpb').value=S.bpb; $('snap').value=S.snap; $('countIn').value=S.countIn; $('grid').value=+S.gridOffset.toFixed(3);
+  $('projName').value=S.name; $('bpm').value=S.bpm; $('bpb').value=S.bpb; $('snap').value=S.snap; $('countIn').value=S.click.countIn; $('grid').value=+S.gridOffset.toFixed(3);
   $('sound').value=S.click.sound; $('sub').value=S.click.sub; $('accent').value=S.click.accent?'1':'0'; $('trim').value=S.click.trim; $('zoom').value=S.pps;
   $('clickFader').value=dbToPos(S.click.db); $('clickDb').textContent=fmtDb(S.click.db); $('cueFader').value=dbToPos(S.click.tracksDb); $('cueDb').textContent=fmtDb(S.click.tracksDb); $('masterFader').value=dbToPos(S.masterDb); $('masterDb').textContent=fmtDb(S.masterDb);
   syncButtons();
@@ -1608,7 +1608,7 @@ $('clickMute').onclick=()=>{ S.click.mute=!S.click.mute; applyLevels(); syncButt
 $('clickTest').onclick=async()=>{ await ctx.resume(); if(remote){await remote.ctx.resume(); remoteDelta=null;} fireClick(ctx.currentTime+.05,0); };
 $('bpm').onchange=e=>{ const v=+e.target.value; if(!(v>=20&&v<=300)){ e.target.value=S.bpm; return toast('Tempo must be between 20 and 300 BPM.'); } S.bpm=v; restart(); drawTimeline(); markDirty(); };
 $('bpb').onchange=e=>{ S.bpb=+e.target.value; restart(); drawTimeline(); markDirty(); };
-$('countIn').onchange=e=>{ S.countIn=+e.target.value; markDirty(); };
+$('countIn').onchange=e=>{ S.click.countIn=+e.target.value; saveClick(); };
 $('grid').onchange=e=>{ S.gridOffset=+e.target.value||0; restart(); drawTimeline(); markDirty(); };
 $('gridHere').onclick=()=>{ S.gridOffset=Math.max(0,currentPos()); $('grid').value=+S.gridOffset.toFixed(3); restart(); drawTimeline(); markDirty(); };
 $('sound').onchange=e=>{ S.click.sound=e.target.value; saveClick(); };
