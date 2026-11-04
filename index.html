@@ -166,11 +166,11 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
 #pubList{overflow:auto;flex:1;min-height:90px;max-height:240px;background:var(--well);border-radius:5px;padding:8px;display:flex;flex-direction:column;gap:5px}
 #pubList label.pubRow{display:flex;gap:8px;align-items:flex-start}
 #pubList .lbl{margin-top:4px}
-#delDlg{width:min(460px,calc(100vw - 32px))}
-#delDlg[open]{display:flex;flex-direction:column;gap:10px}
-#delDlg h2{margin:0;overflow-wrap:anywhere}#delDlg p{margin:0}
-#delDlg label{display:grid;gap:3px}#delDlg label.delAlso{display:flex;gap:8px;align-items:flex-start}#delDlg input[type=text],#delDlg input[type=password]{width:100%}
-#delDlg a{color:var(--led)}#delMsg.warn{color:var(--solo)}
+#delDlg,#repDlg{width:min(460px,calc(100vw - 32px))}
+#delDlg[open],#repDlg[open]{display:flex;flex-direction:column;gap:10px}
+#delDlg h2,#repDlg h2{margin:0;overflow-wrap:anywhere}#delDlg p,#repDlg p{margin:0}
+#delDlg label,#repDlg label{display:grid;gap:3px}#delDlg label.delAlso,#repDlg label.delAlso{display:flex;gap:8px;align-items:flex-start}#delDlg input[type=text],#delDlg input[type=password],#repDlg input[type=text],#repDlg input[type=password]{width:100%}
+#delDlg a,#repDlg a{color:var(--led)}#delMsg.warn,#repMsg.warn{color:var(--solo)}
 @media (max-width:980px),(max-height:620px){
   #libDlg{height:auto;max-height:calc(100vh - 24px);overflow:auto}
   .libCols{grid-template-columns:minmax(0,1fr)}
@@ -334,6 +334,18 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
   <p class="meta">Use a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> with Contents set to Read and write. It is sent only to GitHub and is forgotten when you close this window.</p>
   <p id="delMsg" role="status"></p>
   <div class="acts"><button type="button" class="btn" id="delClose">Cancel</button><button type="button" class="btn primary" id="delGo">Delete</button></div>
+</dialog>
+<dialog id="repDlg" aria-label="Replace the Google Drive file">
+  <h2>Replace the Google Drive file</h2>
+  <p class="meta">Point the web library at a new .btlib file on Google Drive. Save it with Publish list, Save library file, upload it to Drive and share it with anyone who has the link.</p>
+  <label><span class="lbl">New Google Drive share link</span><input id="repDrive" type="text" spellcheck="false" autocomplete="off" placeholder="https://drive.google.com/file/d/…"></label>
+  <label><span class="lbl">Google API key</span><input id="repKey" type="text" spellcheck="false" autocomplete="off"></label>
+  <label class="delAlso"><input type="checkbox" id="repSync" checked><span>Update the song and show list to match the new file</span></label>
+  <label><span class="lbl">Repository</span><input id="repRepo" type="text" spellcheck="false" autocomplete="off"></label>
+  <label><span class="lbl">GitHub token</span><input id="repToken" type="password" autocomplete="off" spellcheck="false"></label>
+  <p class="meta">Use a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> with Contents set to Read and write. It is sent only to GitHub and is forgotten when you close this window.</p>
+  <p id="repMsg" role="status"></p>
+  <div class="acts"><button type="button" class="btn" id="repClose">Cancel</button><button type="button" class="btn primary" id="repGo">Replace</button></div>
 </dialog>
 <input id="fileLib" type="file" multiple accept=".btrack" hidden>
 <input id="fileRestore" type="file" accept=".btlib" hidden>
@@ -1258,7 +1270,9 @@ function renderWebLib(){
   } else $('libSet').innerHTML='<p class="empty">Select a show to see its set list.</p>';
   $('libSongs').innerHTML=web.songs.map(s=>{ const mine=lib.songs.some(x=>x.id===s.id);
     return `<div class="row"><span class="nm">${esc(s.name)}${mine?' <span class="tag">Saved</span>':''}<span class="meta"> ${esc(s.bpm)} BPM · ${fmtLen(s.duration)}${s.size?` · ${(s.size/1048576).toFixed(0)} MB`:''}</span></span><span class="tools"><button data-web="opensong" data-id="${esc(s.id)}">Open</button><button data-web="linksong" data-id="${esc(s.id)}">Copy link</button><button data-web="savesong" data-id="${esc(s.id)}">Save</button>${web.url===DEFAULT_MANIFEST?`<button data-web="delsong" data-id="${esc(s.id)}">Delete</button>`:''}</span></div>`; }).join('')||`<p class="empty">${esc(emptyMsg)}</p>`;
-  if(web.source) $('libSongs').innerHTML+=`<div class="foot driveFoot"><a class="btn" href="${esc(driveView(web.source.fileId))}" target="_blank" rel="noopener">Download library from Drive</a><button class="btn" data-web="restore">Restore downloaded file</button></div>`;
+  const canEdit=web.url===DEFAULT_MANIFEST, rep=canEdit?'<button class="btn" data-web="replace">Replace Drive file</button>':'';
+  if(web.source) $('libSongs').innerHTML+=`<div class="foot driveFoot"><a class="btn" href="${esc(driveView(web.source.fileId))}" target="_blank" rel="noopener">Download library from Drive</a><button class="btn" data-web="restore">Restore downloaded file</button>${rep}</div>`;
+  else if(rep) $('libSongs').innerHTML+=`<div class="foot driveFoot">${rep}</div>`;
 }
 async function copyWebSong(s){
   const blob=await songBlob(s), cur=lib.songs.find(x=>x.id===s.id);
@@ -1273,6 +1287,7 @@ $('libDlg').addEventListener('click',async e=>{
     if(a==='select'){ webSel=id; renderLib(); }
     else if(a==='restore') $('fileRestore').click();
     else if(a==='opensong'){ if(await loadSong(id,'web')) $('libDlg').close(); }
+    else if(a==='replace') openReplace();
     else if(a==='delshow'&&sel) openDelete('show',sel.id);
     else if(a==='delsong') openDelete('song',id);
     else if(a==='linksong') copyLink(shareLink('song',id));
@@ -1341,7 +1356,7 @@ async function pkgOpen(src){
       const jl=new DataView(h9.buffer).getUint32(5,true);
       const jb=whole?whole.slice(9,9+jl):await fetchBlob(url,null,`bytes=9-${8+jl}`), meta=JSON.parse(await jb.text());
       const songs={}; for(const s of meta.songs||[]) if(SAFE_ID.test(s?.id)) songs[s.id]={at:9+jl+(+s.at),len:+s.len};
-      return pkgCache[key]={url,whole,songs};
+      return pkgCache[key]={url,whole,songs,list:meta.songs||[],shows:meta.shows||[]};
     }catch{}
   }
   throw new Error('Google Drive would not let this page read the library file. Check it is shared with anyone who has the link, or press Download library from Drive and restore the file');
@@ -1477,7 +1492,61 @@ async function deleteFromWeb(){
   }catch(e){ delSay(`Nothing was deleted: ${friendlyFetchError(e)}.`,true); go.disabled=false; }
 }
 $('delGo').onclick=deleteFromWeb;
-$('delClose').onclick=()=>$('delDlg').close();
+
+/* Replacing reads the new file's own list of songs and shows, so the web list can be rebuilt from it without your local library. */
+function repSay(t,bad){ $('repMsg').textContent=t; $('repMsg').className=bad?'warn':''; }
+function openReplace(){
+  $('repDrive').value=web.source?driveView(web.source.fileId):''; $('repKey').value=web.source?.apiKey||''; $('repSync').checked=true;
+  $('repRepo').value=defaultRepo(); $('repToken').value=ghToken; repSay('');
+  $('repClose').textContent='Cancel'; $('repGo').hidden=false; $('repGo').disabled=false;
+  $('repDlg').showModal();
+}
+async function replaceDrive(){
+  const typed=$('repDrive').value.trim(), fileId=driveIdOf(typed), apiKey=$('repKey').value.trim(), repo=$('repRepo').value.trim(), sync=$('repSync').checked, go=$('repGo');
+  ghToken=$('repToken').value.trim();
+  if(!fileId) return repSay(/\/folders\//.test(typed)?'That is a link to a folder. In Drive, right-click the .btlib file, choose Share, then Copy link.':typed?'That link does not point to a single Drive file. The link should contain /file/d/.':'Paste the Google Drive share link for the new library file.',true);
+  if(apiKey&&!/^[\w-]{20,80}$/.test(apiKey)) return repSay("That doesn't look like a Google API key.",true);
+  if(!/^[\w.-]+\/[\w.-]+$/.test(repo)) return repSay('Enter the repository as owner/name.',true);
+  if(!ghToken) return repSay('Paste a GitHub token first.',true);
+  go.disabled=true;
+  try{
+    const source={type:'gdrive',fileId,...(apiKey?{apiKey}:{})};
+    repSay('Checking the Google Drive file…');
+    delete pkgCache[fileId+':'+apiKey];
+    let p; try{ p=await pkgOpen(source); }catch{ throw new Error("This page can't read that file. Check it is a Backline library file shared with anyone who has the link, and that the API key is right"); }
+    repSay('Saving the list to GitHub…');
+    const base=`/repos/${repo}`, info=await gh(base), branch=info.default_branch;
+    const old=await gh(`${base}/contents/library/index.json?ref=${encodeURIComponent(branch)}`,{accept:'application/vnd.github.raw+json',allow404:true});
+    const manifest=old?JSON.parse(old):{songs:[],shows:[]}; if(old) parseManifest(manifest,DEFAULT_MANIFEST);
+    const oldFile=manifest.source?.fileId;
+    const tree=[]; let note='';
+    if(sync){
+      const songs=p.list.filter(s=>SAFE_ID.test(s?.id)).map(s=>({id:s.id,name:String(s.name||'Untitled').slice(0,200),bpm:+s.bpm||0,duration:Number.isFinite(s.duration)?s.duration:null,updatedAt:+s.updatedAt||0,size:+s.len||0}));
+      const ids=new Set(songs.map(s=>s.id));
+      for(const s of manifest.songs) if(/^songs\/[\w-]+\.btrack$/.test(s.file||'')) tree.push({path:`library/${s.file}`,mode:'100644',type:'blob',sha:null});
+      manifest.songs=songs;
+      manifest.shows=p.shows.filter(s=>SAFE_ID.test(s?.id)).map(s=>({id:s.id,name:String(s.name||'Untitled show').slice(0,200),date:/^\d{4}-\d\d-\d\d$/.test(s.date)?s.date:'',songIds:(s.songIds||[]).filter(i=>ids.has(i))}));
+    } else {
+      const missing=manifest.songs.filter(s=>!p.songs[s.id]).map(s=>s.name);
+      if(missing.length) note=` These songs aren't in the new file, so they won't open: ${missing.join(', ')}.`;
+    }
+    manifest.version=2; manifest.updatedAt=Date.now(); manifest.source=source;
+    tree.unshift({path:'library/index.json',mode:'100644',type:'blob',content:JSON.stringify(manifest,null,1)});
+    await ghCommit(base,branch,tree,`Replace library file: ${manifest.songs.length} songs, ${manifest.shows.length} shows`);
+    try{ localStorage.setItem('backline.repo',repo); }catch{}
+    web=parseManifest(manifest,DEFAULT_MANIFEST);
+    if(!web.shows.some(s=>s.id===webSel)) webSel=web.shows[0]?.id||null;
+    if(activeShow?.web){ activeShow=web.shows.find(s=>s.id===activeShow.id)||null; renderSetbar(); }
+    renderLib();
+    const n=manifest.songs.length, m=manifest.shows.length;
+    repSay(`Replaced the file. The list has ${n} song${n===1?'':'s'} and ${m} show${m===1?'':'s'}. Other people will see the change in a minute or two.${oldFile&&oldFile!==fileId?' You can delete the old file from Drive if nothing else uses it.':''}${note}`,!!note);
+    go.hidden=true; $('repClose').textContent='Close';
+  }catch(e){ repSay(`Nothing was replaced: ${friendlyFetchError(e)}.`,true); go.disabled=false; }
+}
+$('repGo').onclick=replaceDrive;
+$('repClose').onclick=()=>{ ghToken=''; $('repToken').value=''; $('repDlg').close(); };
+$('repDlg').addEventListener('close',()=>{ ghToken=''; $('repToken').value=''; });
+$('delClose').onclick=()=>{ ghToken=''; $('delToken').value=''; $('delDlg').close(); };
 $('delDlg').addEventListener('close',()=>{ ghToken=''; $('delToken').value=''; });
 $('libPublish').onclick=openPublish;
 $('pubGo').onclick=publish;
