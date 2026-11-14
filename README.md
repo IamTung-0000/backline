@@ -4,6 +4,8 @@ A backing track player that runs in the browser: mixer, MP3/WAV import and expor
 
 The master has a limiter (LIMIT, on by default) that keeps it below -1 dB, in playback and in master exports. The button next to it adds up to +12 dB of output gain for playback, for outputs that sound quiet such as the left/right split. The Click and Tracks strips have the same kind of button for the click output.
 
+Master exports can start with the spoken count-in: tick **Start with the spoken count-in** in the export window. It plays at the click fader level, in the right channel for the left/right split.
+
 Click settings, including Count-in (a spoken "1, 2, 1 2 3 4" to start), belong to the browser, not to each song, and the click starts muted. The Tracks strip next to Click sends the track mix to the click output too, so players hear the song with the click. It needs a click output other than "Mixed with tracks".
 
 Pressing Play says "Ready" on the click output, waits 3 seconds, then starts. Press Play or Stop during the wait to cancel. The voice follows the click's on/off button, mute and fader, so it is silent while the click is muted. The "Ready" and count-in voices were made with the macOS Samantha voice.

@@ -91,6 +91,7 @@ input.fader::-moz-range-thumb{width:22px;height:34px;background:linear-gradient(
 .db{font:400 11px/1 var(--mono);text-align:center;color:var(--dim);font-variant-numeric:tabular-nums}
 #clickStrip,#cueStrip{--c:var(--click)} #masterStrip{--c:var(--led)}
 #cueStrip.off{opacity:.45}
+#expDlg label.expCheck{display:flex;flex-direction:row;gap:8px;align-items:center}
 #clickExp{flex:1.6!important}
 #boost.on,.gainBtn.on{background:var(--led);color:#201608;border-color:var(--led)}
 #limit.on{background:var(--led);color:#201608;border-color:var(--led)} #limit.on.act{background:var(--click);border-color:var(--click)}
@@ -276,6 +277,7 @@ a.btn{color:inherit;text-decoration:none;display:inline-block}
     <option value="mix">Track mix</option><option value="mixclick">Track mix with click</option><option value="click">Click only</option><option value="split">Tracks in left ear, click in right</option>
   </select></label>
   <label id="expLevelRow"><span class="lbl">Stem level</span><select id="expLevel"><option value="mixer">Keep track fader and pan</option><option value="raw">Original level, centred</option></select></label>
+  <label class="expCheck" id="expCountRow"><input type="checkbox" id="expCount"><span>Start with the spoken count-in (1, 2, 1 2 3 4)</span></label>
   <label><span class="lbl">Range</span><select id="expRange"><option value="all">Whole song</option><option value="loop">Loop region</option></select></label>
   <progress id="expProg" max="1" value="0" hidden></progress>
   <div class="acts"><button type="button" class="btn" id="expCancel">Close</button><button type="button" class="btn primary" id="expGo">Export file</button></div>
@@ -560,12 +562,16 @@ Promise.all(COUNT_MP3.map(b=>ctx.decodeAudioData(Uint8Array.from(atob(b),c=>c.ch
   let i=0; while(i<d.length&&Math.abs(d[i])<max*.05) i++;
   return {buf,onset:Math.max(0,i/buf.sampleRate-.005)};
 }))).then(v=>countVoice=v).catch(()=>{});
-function speakCount(start){
-  if(!countVoice) return;
-  const n=S.bpb, b=beatSec(), words=[];
+function countWords(){
+  const n=S.bpb, words=[];
   for(let i=0;i<n;i+=2) words.push([i,i/2]);
   for(let i=0;i<n;i++) words.push([n+i,i]);
-  for(const [beat,num] of words){
+  return words;
+}
+function speakCount(start){
+  if(!countVoice) return;
+  const b=beatSec();
+  for(const [beat,num] of countWords()){
     const v=countVoice[num]; if(!v) continue;
     const c=activeClick(), src=c.ctx.createBufferSource(); src.buffer=v.buf; src.connect(c.gain);
     let t=start+beat*b+S.click.trim/1000; if(remote) t=remoteTime(t);
@@ -919,17 +925,27 @@ async function renderClick(from,to,rate){
   }
   return off.startRendering();
 }
-async function renderExport(what,from,to,rate,stem){
+/* The spoken count-in for an export: two bars at the click fader level, with the last word allowed to run into the song. */
+async function renderCount(rate){
+  if(!countVoice) throw new Error('the count-in voice has not loaded yet. Try again in a moment');
+  const b=beatSec(), pre=2*S.bpb*b, off=new OfflineAudioContext(1,Math.ceil((pre+1)*rate),rate), m=off.createGain();
+  m.gain.value=gainOf(S.click.db); m.connect(off.destination);
+  for(const [beat,num] of countWords()){ const v=countVoice[num]; if(!v) continue; const s=off.createBufferSource(); s.buffer=v.buf; s.connect(m); s.start(beat*b,v.onset); }
+  return {voice:(await off.startRendering()).getChannelData(0),lead:Math.round(pre*rate)};
+}
+async function renderExport(what,from,to,rate,stem,count){
   const a=what!=='click'?await renderTracks(from,to,rate,stem):null, c=what!=='mix'&&what!=='stem'?await renderClick(from,to,rate):null;
-  const n=(a||c).length, L=new Float32Array(n), R=new Float32Array(n);
+  const cnt=count?await renderCount(rate):null, lead=cnt?cnt.lead:0;
+  const n=(a||c).length, L=new Float32Array(lead+n), R=new Float32Array(lead+n);
   const al=a?.getChannelData(0), ar=a?.getChannelData(1), cl=c?.getChannelData(0), cr=c?.getChannelData(1);
-  let peak=0;
   for(let i=0;i<n;i++){
     let x,y;
     if(what==='split'){ x=(al[i]+ar[i])/2; y=(cl[i]+cr[i])/2; }
     else { x=(al?al[i]:0)+(cl?cl[i]:0); y=(ar?ar[i]:0)+(cr?cr[i]:0); }
-    L[i]=x;R[i]=y; const p=Math.max(Math.abs(x),Math.abs(y)); if(p>peak)peak=p;
+    L[lead+i]=x; R[lead+i]=y;
   }
+  if(cnt) for(let i=0;i<cnt.voice.length&&i<L.length;i++){ R[i]+=cnt.voice[i]; if(what!=='split') L[i]+=cnt.voice[i]; }
+  let peak=0; for(let i=0;i<L.length;i++){ const p=Math.max(Math.abs(L[i]),Math.abs(R[i])); if(p>peak) peak=p; }
   return {L,R,peak};
 }
 async function saveBlob(blob,name,desc,ext,mime,handle){
@@ -952,7 +968,7 @@ function openExport(target){
   const has=S.loop.b>S.loop.a; $('expRange').querySelector('[value=loop]').disabled=!has; if(!has) $('expRange').value='all';
   $('expRate').value=ctx.sampleRate===48000?'48000':'44100'; $('expProg').hidden=true;
   $('expTitle').textContent={all:'Export audio',master:'Export master',click:'Export click',track:`Export stem: ${target.track?.name}`}[target.kind];
-  $('expWhatRow').hidden=target.kind==='track'||target.kind==='click'; $('expLevelRow').hidden=target.kind!=='track';
+  $('expWhatRow').hidden=target.kind==='track'||target.kind==='click'; $('expLevelRow').hidden=target.kind!=='track'; $('expCountRow').hidden=target.kind!=='master'&&target.kind!=='all';
   $('expDlg').showModal();
 }
 $('exportBtn').onclick=()=>openExport({kind:'all'});
@@ -960,15 +976,15 @@ $('masterExp').onclick=()=>openExport({kind:'master'});
 $('clickExp').onclick=()=>openExport({kind:'click'});
 $('expCancel').onclick=()=>$('expDlg').close();
 $('expGo').onclick=async()=>{
-  const fmt=$('expFmt').value, rate=+$('expRate').value, tgt=expTarget, what=tgt.kind==='track'?'stem':tgt.kind==='click'?'click':$('expWhat').value, stem=tgt.kind==='track'?{track:tgt.track,raw:$('expLevel').value==='raw'}:null, loop=$('expRange').value==='loop';
+  const fmt=$('expFmt').value, rate=+$('expRate').value, tgt=expTarget, what=tgt.kind==='track'?'stem':tgt.kind==='click'?'click':$('expWhat').value, stem=tgt.kind==='track'?{track:tgt.track,raw:$('expLevel').value==='raw'}:null, loop=$('expRange').value==='loop', count=!$('expCountRow').hidden&&$('expCount').checked;
   const from=loop?S.loop.a:0, to=loop?S.loop.b:duration(), prog=$('expProg');
   $('expGo').disabled=true; prog.hidden=false; prog.value=0; prog.removeAttribute('value');
   try{
-    const {L,R,peak}=await renderExport(what,from,to,rate,stem);
+    const {L,R,peak}=await renderExport(what,from,to,rate,stem,count);
     let blob, ext, mime;
     if(fmt.startsWith('mp3')){ prog.value=0; blob=await encodeMp3(L,R,rate,+fmt.split(':')[1],p=>prog.value=p); ext='.mp3'; mime='audio/mpeg'; }
     else { blob=new Blob([encodeWav(L,R,rate,fmt==='wav24'?24:16)],{type:'audio/wav'}); ext='.wav'; mime='audio/wav'; }
-    const suffix=stem?` - ${cleanName(stem.track.name)||'Track'}`:{mix:'',mixclick:' (with click)',click:' (click)',split:' (L tracks R click)'}[what];
+    const suffix=(stem?` - ${cleanName(stem.track.name)||'Track'}`:{mix:'',mixclick:' (with click)',click:' (click)',split:' (L tracks R click)'}[what])+(count?' (count-in)':'');
     const saved=await saveBlob(blob,safeName()+suffix+ext,'Audio file',ext,mime);
     if(saved){ $('expDlg').close(); const over=20*Math.log10(peak||1e-9); toast(over>0?`Exported, but the audio peaked ${over.toFixed(1)} dB over and clipped. Lower the ${stem?'track':'master'} fader and export again.`:`Exported ${safeName()+suffix+ext}.`,7000); }
   }catch(e){ toast(`Export failed: ${e.message}`,7000); }
