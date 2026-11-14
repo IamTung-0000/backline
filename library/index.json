@@ -1,65 +1,11 @@
 {
  "version": 2,
- "updatedAt": 1793929303702,
+ "updatedAt": 1794670223189,
  "source": {
   "type": "gdrive",
   "fileId": "1pVUd81SLNWCifZUsLwcXTXtorPHDEW64",
   "apiKey": "AIzaSyAgEMIlzZ6QhsjtLKotKp5kYWfYHvjn8ew"
  },
- "songs": [
-  {
-   "id": "35fec129-bb3c-4d8f-b578-eeac51dadde8",
-   "name": "Con Zuyen",
-   "bpm": 138,
-   "duration": 290.4347916666667,
-   "updatedAt": 1793645406202,
-   "size": 116121712
-  },
-  {
-   "id": "51499a24-78a7-4735-b216-9f72c0e7058a",
-   "name": "Dau la Lan Cuoi",
-   "bpm": 130,
-   "duration": 260.3077083333333,
-   "updatedAt": 1793928771322,
-   "size": 83335700
-  },
-  {
-   "id": "2e9a1c26-986a-4ccc-a18f-ea4147eaeab3",
-   "name": "Hoa Ra La - JRC",
-   "bpm": 108,
-   "duration": 220.07385416666668,
-   "updatedAt": 1793707026328,
-   "size": 43737202
-  },
-  {
-   "id": "def70ecf-d074-44e7-94a1-6bd62ea43bc7",
-   "name": "Nem Dien Thoai",
-   "bpm": 118,
-   "duration": 179.60591666666667,
-   "updatedAt": 1793644784048,
-   "size": 21508040
-  },
-  {
-   "id": "a7f08d4d-3d98-4e44-97d7-91632a74856b",
-   "name": "Not Gud",
-   "bpm": 133,
-   "duration": 209.3233125,
-   "updatedAt": 1793928753315,
-   "size": 75414354
-  }
- ],
- "shows": [
-  {
-   "id": "fea16ce5-9593-488c-b1db-bcf15ee73895",
-   "name": "Show Da Lat",
-   "date": "2026-11-14",
-   "songIds": [
-    "2e9a1c26-986a-4ccc-a18f-ea4147eaeab3",
-    "def70ecf-d074-44e7-94a1-6bd62ea43bc7",
-    "35fec129-bb3c-4d8f-b578-eeac51dadde8",
-    "a7f08d4d-3d98-4e44-97d7-91632a74856b",
-    "51499a24-78a7-4735-b216-9f72c0e7058a"
-   ]
-  }
- ]
+ "songs": [],
+ "shows": []
 }
