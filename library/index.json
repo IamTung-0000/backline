@@ -1,6 +1,6 @@
 {
  "version": 2,
- "updatedAt": 1794672219592,
+ "updatedAt": 1794672313185,
  "source": {
   "type": "gdrive",
   "fileId": "1wOyLfehOmU3y5XjFtLNDL6vufIiYvXAG",
@@ -56,19 +56,5 @@
    "size": 40903049
   }
  ],
- "shows": [
-  {
-   "id": "bbb84fcd-5f2a-4b16-a341-b1128110bc35",
-   "name": "Show Da Lat",
-   "date": "2026-11-14",
-   "songIds": [
-    "f6849e6d-5994-4103-9934-60af1fc80ec9",
-    "afbcac8a-f2e1-4ddb-b9a9-e0854799c05d",
-    "f55f379a-9506-4a38-8cd3-5afec137df5f",
-    "a17f4021-fe74-4f4e-87f5-7babcbaed48b",
-    "d7dc45ba-63c9-4e54-9d0e-b89d81bf5b2a",
-    "cc6e0cd8-0ed2-475b-8441-874bb7164926"
-   ]
-  }
- ]
+ "shows": []
 }
