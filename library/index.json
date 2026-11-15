@@ -1,20 +1,12 @@
 {
  "version": 2,
- "updatedAt": 1794672313185,
+ "updatedAt": 1794704087262,
  "source": {
   "type": "gdrive",
   "fileId": "1wOyLfehOmU3y5XjFtLNDL6vufIiYvXAG",
   "apiKey": "AIzaSyAgEMIlzZ6QhsjtLKotKp5kYWfYHvjn8ew"
  },
  "songs": [
-  {
-   "id": "d7dc45ba-63c9-4e54-9d0e-b89d81bf5b2a",
-   "name": "Bad Time",
-   "bpm": 135,
-   "duration": 244,
-   "updatedAt": 1794672151143,
-   "size": 9761887
-  },
   {
    "id": "a17f4021-fe74-4f4e-87f5-7babcbaed48b",
    "name": "Con Duyen",
